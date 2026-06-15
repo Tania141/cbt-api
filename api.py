@@ -93,15 +93,26 @@ def init_db():
     with conn:
         with conn.cursor() as cur:
             cur.execute("""
+                CREATE TABLE IF NOT EXISTS tenants (
+                    id         SERIAL PRIMARY KEY,
+                    name       TEXT NOT NULL,
+                    email      TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    is_active  BOOLEAN NOT NULL DEFAULT TRUE
+                )
+            """)
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS projects (
                     id          SERIAL PRIMARY KEY,
-                    pi          TEXT NOT NULL UNIQUE,
+                    pi          TEXT NOT NULL,
+                    tenant_id   TEXT NOT NULL,
                     stroej      TEXT,
                     address     TEXT,
                     consultant  TEXT,
                     passport    JSONB,
                     created_at  TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at  TIMESTAMPTZ DEFAULT NOW()
+                    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE (pi, tenant_id)
                 )
             """)
             cur.execute("""
@@ -487,6 +498,15 @@ def require_auth(f):
         return f(*args, **kwargs)
     return wrapper
 
+def require_admin(f):
+    @wraps(f)
+    @require_auth
+    def wrapper(*args, **kwargs):
+        if request.current_user.get("role") != "admin":
+            return jsonify({"error": "Само администратори имат достъп"}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/health", methods=["GET"])
 def health():
@@ -533,9 +553,11 @@ def auth_register():
     body = request.get_json()
     if not body or not body.get("email") or not body.get("password"):
         return jsonify({"error": "Необходими са email и password"}), 400
+    if not body.get("tenant_id"):
+        return jsonify({"error": "Необходим е tenant_id"}), 400
 
     role      = body.get("role", "viewer")
-    tenant_id = body.get("tenant_id")
+    tenant_id = str(body["tenant_id"])
     if role not in ("admin", "operator", "viewer"):
         return jsonify({"error": "Невалидна роля. Позволени: admin, operator, viewer"}), 400
 
@@ -545,6 +567,10 @@ def auth_register():
     if not conn:
         return jsonify({"error": "База данни не е свързана"}), 503
     try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM tenants WHERE id = %s AND is_active = TRUE", (tenant_id,))
+            if not cur.fetchone():
+                return jsonify({"error": "Невалиден или неактивен tenant_id"}), 400
         with conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -612,13 +638,61 @@ def auth_me():
         conn.close()
 
 
+@app.route("/api/admin/tenants", methods=["POST"])
+@require_admin
+def create_tenant():
+    body = request.get_json()
+    if not body or not body.get("name") or not body.get("email"):
+        return jsonify({"error": "Необходими са name и email"}), 400
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO tenants (name, email)
+                       VALUES (%s, %s) RETURNING id, name, email, created_at, is_active""",
+                    (body["name"].strip(), body["email"].lower().strip())
+                )
+                tenant = dict(cur.fetchone())
+        return jsonify({"status": "ok", "tenant": tenant}), 201
+    except psycopg2.errors.UniqueViolation:
+        return jsonify({"error": "Tenant с този email вече съществува"}), 409
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/tenants", methods=["GET"])
+@require_admin
+def list_tenants():
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name, email, created_at, is_active FROM tenants ORDER BY created_at DESC")
+            tenants = [dict(r) for r in cur.fetchall()]
+        return jsonify({"tenants": tenants, "count": len(tenants)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
 @app.route("/api/passports", methods=["GET"])
 @require_auth
 def list_passports():
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
     dbx = get_dropbox()
     if not dbx: return jsonify({"error": "Dropbox не е конфигуриран"}), 503
     try:
-        entries = dbx_list_folder(dbx, DROPBOX_FOLDER)
+        tenant_folder = f"{DROPBOX_FOLDER}/{tenant_id}"
+        entries = dbx_list_folder(dbx, tenant_folder)
         result = []
         for e in entries:
             if hasattr(e, "path_display") and not e.path_display.endswith(".xlsx"):
@@ -628,18 +702,21 @@ def list_passports():
                     result.append({"pi": p.get("ПИ",""), "stroej": p.get("Строеж",""),
                                    "address": p.get("Адрес",""), "consultant": p.get("Консултант_Фирма","")})
                 except: pass
-        return jsonify({"passports": result, "count": len(result)})
+        return jsonify({"passports": result, "count": len(result), "tenant_id": tenant_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/passports/<pi>", methods=["GET"])
 @require_auth
 def get_passport(pi):
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
     dbx = get_dropbox()
     if not dbx: return jsonify({"error": "Dropbox не е конфигуриран"}), 503
     try:
-        data = dbx_download(dbx, f"{DROPBOX_FOLDER}/PI-{pi}/passport.xlsx")
-        return jsonify({"pi": pi, "passport": read_passport_excel(data)})
+        data = dbx_download(dbx, f"{DROPBOX_FOLDER}/{tenant_id}/PI-{pi}/passport.xlsx")
+        return jsonify({"pi": pi, "tenant_id": tenant_id, "passport": read_passport_excel(data)})
     except ApiError:
         return jsonify({"error": f"Паспорт PI-{pi} не е намерен"}), 404
     except Exception as e:
@@ -648,23 +725,29 @@ def get_passport(pi):
 @app.route("/api/passports/<pi>", methods=["POST"])
 @require_auth
 def save_passport(pi):
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
     dbx = get_dropbox()
     if not dbx: return jsonify({"error": "Dropbox не е конфигуриран"}), 503
     body = request.get_json()
     if not body or "passport" not in body:
         return jsonify({"error": "Липсва поле 'passport'"}), 400
-    folder = f"{DROPBOX_FOLDER}/PI-{pi}"
+    folder = f"{DROPBOX_FOLDER}/{tenant_id}/PI-{pi}"
     path   = f"{folder}/passport.xlsx"
     try:
         dbx_create_folder(dbx, folder)
         dbx_upload(dbx, path, build_passport_excel(body["passport"]))
-        return jsonify({"status": "ok", "pi": pi, "path": path})
+        return jsonify({"status": "ok", "pi": pi, "tenant_id": tenant_id, "path": path})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/generate/<doc_type>", methods=["POST"])
 @require_auth
 def generate_document(doc_type):
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
     if doc_type not in TEMPLATE_FILES:
         return jsonify({"error": f"Непознат тип: {doc_type}. Позволени: {list(TEMPLATE_FILES.keys())}"}), 400
     dbx = get_dropbox()
@@ -682,7 +765,7 @@ def generate_document(doc_type):
         repl["{{Заповедна_Дата}}"]  = fmt_date(body.get("zapovedna_date", ""))
 
     filename = f"PI-{pi}_{DOC_LABELS[doc_type]}.docx"
-    folder   = f"{DROPBOX_FOLDER}/PI-{pi}"
+    folder   = f"{DROPBOX_FOLDER}/{tenant_id}/PI-{pi}"
     path     = f"{folder}/{filename}"
 
     try:
@@ -703,13 +786,16 @@ def generate_document(doc_type):
 @app.route("/api/cloud/save", methods=["POST"])
 @require_auth
 def cloud_save():
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
     dbx = get_dropbox()
     if not dbx:
         return jsonify({"error": "Dropbox не е свързан"}), 503
     body = request.get_json()
     if not body:
         return jsonify({"error": "Липсва тяло"}), 400
-    path = f"{DROPBOX_FOLDER}/_akt_projects.json"
+    path = f"{DROPBOX_FOLDER}/{tenant_id}/_akt_projects.json"
     try:
         data = json.dumps(body, ensure_ascii=False, indent=2).encode('utf-8')
         dbx_upload(dbx, path, data)
@@ -720,10 +806,13 @@ def cloud_save():
 @app.route("/api/cloud/load", methods=["GET"])
 @require_auth
 def cloud_load():
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
     dbx = get_dropbox()
     if not dbx:
         return jsonify({"error": "Dropbox не е свързан"}), 503
-    path = f"{DROPBOX_FOLDER}/_akt_projects.json"
+    path = f"{DROPBOX_FOLDER}/{tenant_id}/_akt_projects.json"
     try:
         data = dbx_download(dbx, path)
         payload = json.loads(data.decode('utf-8'))
