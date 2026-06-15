@@ -798,17 +798,18 @@ def list_passports():
     if not conn:
         return jsonify({"error": "База данни не е конфигурирана"}), 503
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT pi, stroej, address, consultant, passport, created_at, updated_at "
-                    "FROM projects WHERE tenant_id = %s ORDER BY updated_at DESC",
-                    (str(tenant_id),)
-                )
-                rows = cur.fetchall()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pi, stroej, address, consultant, passport, created_at, updated_at "
+                "FROM projects WHERE tenant_id = %s ORDER BY updated_at DESC",
+                (str(tenant_id),)
+            )
+            rows = cur.fetchall()
+        conn.close()
         result = []
         for r in rows:
-            entry = dict(r.get("passport") or {})
+            passport_data = r["passport"] or {}
+            entry = dict(passport_data) if isinstance(passport_data, dict) else {}
             entry["pi"]         = r["pi"]
             entry["stroej"]     = r["stroej"] or ""
             entry["address"]    = r["address"] or ""
@@ -816,12 +817,11 @@ def list_passports():
             entry["createdAt"]  = r["created_at"].isoformat() if r["created_at"] else None
             entry["updatedAt"]  = r["updated_at"].isoformat() if r["updated_at"] else None
             result.append(entry)
-        conn.close()
         log_action("get_passports", user_id=request.current_user["sub"], tenant_id=tenant_id,
                    detail={"count": len(result)})
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "type": type(e).__name__}), 500
 
 @app.route("/api/passports/<pi>", methods=["GET"])
 @require_auth
