@@ -1002,7 +1002,7 @@ def ai_generate():
         })
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=4000,
             messages=[{"role": "user", "content": content}]
         )
@@ -1103,7 +1103,7 @@ def validate_document(doc_type):
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=2000,
             system=VALIDATION_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}]
