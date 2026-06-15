@@ -129,6 +129,17 @@ def init_db():
                     created_at  TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            # Migrate existing audit_log tables that have the old schema
+            for col, typedef in [
+                ("user_id",    "TEXT"),
+                ("tenant_id",  "TEXT"),
+                ("endpoint",   "TEXT"),
+                ("method",     "TEXT"),
+                ("ip_address", "TEXT"),
+                ("user_agent", "TEXT"),
+                ("detail",     "JSONB"),
+            ]:
+                cur.execute(f"ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS {col} {typedef}")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id            SERIAL PRIMARY KEY,
