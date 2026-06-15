@@ -1025,6 +1025,123 @@ def ai_generate():
         return jsonify({"error": str(e)}), 500
 
 
+# ── AI Валидация ──────────────────────────────────────────────────────────────
+VALIDATION_SYSTEM_PROMPT = """Ти си експерт по българското строително законодателство, специализиран в Наредба №3 от 2003 г. за съставяне на актове и протоколи по време на строителство.
+
+Задачата ти е да валидираш строителни документи. Анализирай предоставения текст и върни САМО валиден JSON обект (без обяснения, без markdown, без ```json блокове) в следния формат:
+
+{
+  "status": "valid" | "warning" | "error",
+  "score": <число 0-100>,
+  "issues": [
+    {"severity": "error"|"warning"|"info", "field": "<поле или секция>", "message": "<описание на проблема>"}
+  ],
+  "suggestions": [
+    "<конкретна препоръка за подобрение>"
+  ]
+}
+
+Правила за статус:
+- "valid"   — score >= 80, няма грешки (error), може да има предупреждения
+- "warning" — score 50-79, или има предупреждения без грешки
+- "error"   — score < 50, или има поне една грешка (error)
+
+Критерии за валидация:
+1. ПЪЛНОТА — всички задължителни полета попълнени (страни, дати, описания, подписи)
+2. ЛОГИЧЕСКА ПОСЛЕДОВАТЕЛНОСТ — съответства ли на изискванията на Наредба №3 за конкретния тип документ
+3. РЕГУЛАТОРНО СЪОТВЕТСТВИЕ — правилни наименования, номерация, позовавания на нормативни актове
+4. ФОРМАЛНИ ИЗИСКВАНИЯ — правилен формат на дати (дд.мм.гггг), номера на разрешения, ЕИК формат"""
+
+DOC_TYPE_CONTEXT = {
+    "protokol2":   "Протокол №2 за установяване годността за ползване на строежа (Приложение №2 към Наредба №3)",
+    "protokol2p2": "Протокол №2, Част 2 — допълнителни констатации",
+    "protokol2a":  "Протокол №2а по Наредба №3",
+    "obrazec3":    "Образец №3 — констативен протокол",
+    "akt5":        "Акт №5 за приемане на кофражи и армировка (Приложение №5 към Наредба №3)",
+    "akt6":        "Акт №6 за приемане на направени изкопи (Приложение №6 към Наредба №3)",
+    "akt7":        "Акт №7 за приемане на земна основа (Приложение №7 към Наредба №3)",
+    "akt8":        "Акт №8 за приемане на изпълнена конструкция (Приложение №8 към Наредба №3)",
+    "akt9":        "Акт №9 — Дневник за бетонови работи (Приложение №9 към Наредба №3)",
+    "akt10":       "Акт №10 за приемане на изпълнена хидроизолация (Приложение №10 към Наредба №3)",
+    "akt11":       "Акт №11 за приемане на изпълнена топлоизолация (Приложение №11 към Наредба №3)",
+    "akt13":       "Акт №13 за приемане на конструкцията (Приложение №13 към Наредба №3)",
+    "akt14":       "Акт №14 за приемане на конструкцията и частите на строежа (Приложение №14 към Наредба №3)",
+    "zapovedna":   "Заповедна книга по чл.163 от ЗУТ",
+    "akt15":       "Акт №15 за установяване на всички видове строителни и монтажни работи (Приложение №15 към Наредба №3)",
+    "akt16":       "Акт №16 за установяване годността за ползване на строежа (Приложение №16 към Наредба №3)",
+    "doklad":      "Окончателен доклад на консултанта по чл.168 от ЗУТ",
+}
+
+
+@app.route("/api/validate/<doc_type>", methods=["POST"])
+@require_auth
+def validate_document(doc_type):
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран в Railway"}), 503
+
+    if doc_type not in DOC_TYPE_CONTEXT:
+        return jsonify({"error": f"Непознат тип: {doc_type}. Позволени: {list(DOC_TYPE_CONTEXT.keys())}"}), 400
+
+    body = request.get_json()
+    if not body or not body.get("text"):
+        return jsonify({"error": "Липсва поле 'text' с текста на документа"}), 400
+
+    doc_text  = body["text"]
+    doc_label = DOC_TYPE_CONTEXT[doc_type]
+    tenant_id = request.current_user.get("tenant_id")
+    user_id   = request.current_user.get("sub")
+
+    user_prompt = f"""Тип документ: {doc_label}
+
+Текст за валидация:
+---
+{doc_text}
+---
+
+Валидирай документа по четирите критерия и върни JSON."""
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            system=VALIDATION_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}]
+        )
+
+        raw = "".join(block.text for block in response.content if hasattr(block, "text")).strip()
+
+        # Strip accidental markdown fences
+        if raw.startswith("```"):
+            raw = re.sub(r"^```[a-z]*\n?", "", raw)
+            raw = re.sub(r"\n?```$", "", raw.rstrip())
+
+        result = json.loads(raw)
+
+        # Ensure required keys exist with safe defaults
+        result.setdefault("status", "error")
+        result.setdefault("score", 0)
+        result.setdefault("issues", [])
+        result.setdefault("suggestions", [])
+
+        log_action("validate_doc", user_id=user_id, tenant_id=tenant_id,
+                   detail={"doc_type": doc_type, "status": result["status"], "score": result["score"]})
+
+        return jsonify({
+            **result,
+            "doc_type":      doc_type,
+            "input_tokens":  response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+        })
+
+    except json.JSONDecodeError:
+        return jsonify({"error": "Claude върна невалиден JSON", "raw": raw}), 502
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Claude API грешка: {str(e)}"}), 502
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 init_db()
 
 if __name__ == "__main__":
