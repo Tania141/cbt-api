@@ -3,7 +3,7 @@
 """
 import os, io, re, json, base64
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import openpyxl
 from openpyxl import Workbook
@@ -867,8 +867,6 @@ def generate_document(doc_type):
         return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
     if doc_type not in TEMPLATE_FILES:
         return jsonify({"error": f"Непознат тип: {doc_type}. Позволени: {list(TEMPLATE_FILES.keys())}"}), 400
-    dbx = get_dropbox()
-    if not dbx: return jsonify({"error": "Dropbox не е конфигуриран"}), 503
     body = request.get_json()
     if not body or "passport" not in body:
         return jsonify({"error": "Липсва поле 'passport'"}), 400
@@ -881,19 +879,42 @@ def generate_document(doc_type):
         repl["{{Заповедна_Номер}}"] = body.get("zapovedna_number", "___")
         repl["{{Заповедна_Дата}}"]  = fmt_date(body.get("zapovedna_date", ""))
 
-    filename = f"PI-{pi}_{DOC_LABELS[doc_type]}.docx"
-    folder   = f"{DROPBOX_FOLDER}/{tenant_id}/PI-{pi}"
-    path     = f"{folder}/{filename}"
+    download_name = f"{doc_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
 
     try:
         doc_bytes = generate_from_template(TEMPLATE_FILES[doc_type], repl)
-        dbx_create_folder(dbx, folder)
-        dbx_upload(dbx, path, doc_bytes)
-        file_url = get_shared_link(dbx, path)
+
+        # Optional Dropbox upload — only if credentials are configured
+        file_url = None
+        if DROPBOX_REFRESH_TOKEN:
+            dbx = get_dropbox()
+            if dbx:
+                pi_filename = f"PI-{pi}_{DOC_LABELS[doc_type]}.docx"
+                folder = f"{DROPBOX_FOLDER}/{tenant_id}/PI-{pi}"
+                path   = f"{folder}/{pi_filename}"
+                try:
+                    dbx_create_folder(dbx, folder)
+                    dbx_upload(dbx, path, doc_bytes)
+                    file_url = get_shared_link(dbx, path)
+                except Exception:
+                    pass  # Dropbox failure does not block the download
+
         log_action("generate_doc", user_id=request.current_user["sub"], tenant_id=tenant_id,
-                   detail={"doc_type": doc_type, "pi": pi, "filename": filename})
-        return jsonify({"status": "ok", "doc_type": doc_type, "pi": pi,
-                        "filename": filename, "path": path, "file_url": file_url})
+                   detail={"doc_type": doc_type, "pi": pi, "filename": download_name,
+                           "dropbox_url": file_url})
+
+        buf = io.BytesIO(doc_bytes)
+        buf.seek(0)
+        response = send_file(
+            buf,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            as_attachment=True,
+            download_name=download_name,
+        )
+        if file_url:
+            response.headers["X-Dropbox-URL"] = file_url
+        return response
+
     except FileNotFoundError as e:
         return jsonify({"error": str(e),
                         "hint": f"Постави шаблона в папка: {LOCAL_TEMPLATES_DIR}"}), 404
