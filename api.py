@@ -820,7 +820,7 @@ def list_passports():
             return jsonify({"error": "База данни не е конфигурирана"}), 503
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT pi, stroej, address, consultant, passport, created_at, updated_at "
+                "SELECT pi, stroej, address, passport, created_at, updated_at "
                 "FROM projects WHERE tenant_id = %s ORDER BY updated_at DESC",
                 (str(tenant_id),)
             )
@@ -830,12 +830,12 @@ def list_passports():
         for r in rows:
             passport_data = r["passport"] or {}
             entry = dict(passport_data) if isinstance(passport_data, dict) else {}
-            entry["pi"]         = r["pi"]
-            entry["stroej"]     = r["stroej"] or ""
-            entry["address"]    = r["address"] or ""
-            entry["consultant"] = r["consultant"] or ""
-            entry["createdAt"]  = r["created_at"].isoformat() if r["created_at"] else None
-            entry["updatedAt"]  = r["updated_at"].isoformat() if r["updated_at"] else None
+            entry["pi"]        = r["pi"]
+            entry["stroej"]    = r["stroej"] or ""
+            entry["address"]   = r["address"] or ""
+            # consultant stays as JSONB object {id, name} from passport — TEXT column not used
+            entry["createdAt"] = r["created_at"].isoformat() if r["created_at"] else None
+            entry["updatedAt"] = r["updated_at"].isoformat() if r["updated_at"] else None
             result.append(entry)
         log_action("get_passports", user_id=request.current_user["sub"], tenant_id=tenant_id,
                    detail={"count": len(result)})
