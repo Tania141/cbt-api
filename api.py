@@ -13,6 +13,8 @@ import dropbox
 from dropbox.exceptions import ApiError
 from dropbox.files import WriteMode
 import anthropic
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 app = Flask(__name__)
 CORS(app, origins=[
@@ -21,6 +23,8 @@ CORS(app, origins=[
     "http://127.0.0.1",
     "null"  # file:// local files
 ])
+
+DATABASE_URL          = os.environ.get("DATABASE_URL", "")
 
 DROPBOX_TOKEN         = os.environ.get("DROPBOX_TOKEN", "")
 DROPBOX_REFRESH_TOKEN = os.environ.get("DROPBOX_REFRESH_TOKEN", "")
@@ -69,6 +73,58 @@ DOC_LABELS = {
     "akt16":       "Akt_16",
     "doklad":      "Okonchatelen_Doklad",
 }
+
+# ── PostgreSQL ────────────────────────────────────────────────────────────────
+def get_db():
+    if not DATABASE_URL:
+        return None
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+
+def init_db():
+    conn = get_db()
+    if not conn:
+        print("DATABASE_URL не е зададен — PostgreSQL пропуснат")
+        return
+    with conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id          SERIAL PRIMARY KEY,
+                    pi          TEXT NOT NULL UNIQUE,
+                    stroej      TEXT,
+                    address     TEXT,
+                    consultant  TEXT,
+                    passport    JSONB,
+                    created_at  TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at  TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id          SERIAL PRIMARY KEY,
+                    action      TEXT NOT NULL,
+                    pi          TEXT,
+                    doc_type    TEXT,
+                    detail      TEXT,
+                    created_at  TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+    conn.close()
+    print("PostgreSQL: таблиците са готови")
+
+def db_log(action, pi=None, doc_type=None, detail=None):
+    conn = get_db()
+    if not conn:
+        return
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO audit_log (action, pi, doc_type, detail) VALUES (%s, %s, %s, %s)",
+                    (action, pi, doc_type, detail)
+                )
+    finally:
+        conn.close()
 
 # ── Dropbox helpers ───────────────────────────────────────────────────────────
 def get_dropbox():
@@ -404,6 +460,18 @@ def health():
             except:
                 templates[key] = f"ЛИПСВА ({fname})"
 
+    db_ok = False
+    db_error = None
+    try:
+        conn = get_db()
+        if conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            conn.close()
+            db_ok = True
+    except Exception as e:
+        db_error = str(e)
+
     return jsonify({
         "status": "ok", "version": "2.1",
         "timestamp": datetime.utcnow().isoformat(),
@@ -412,6 +480,7 @@ def health():
         "templates_folder": TEMPLATES_FOLDER,
         "templates": templates,
         "ai": "конфигуриран" if ANTHROPIC_API_KEY else "не е конфигуриран",
+        "database": "свързан" if db_ok else ("не е конфигуриран" if not DATABASE_URL else f"грешка: {db_error}"),
     })
 
 @app.route("/api/passports", methods=["GET"])
@@ -604,6 +673,8 @@ def ai_generate():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+init_db()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
