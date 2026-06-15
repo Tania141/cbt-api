@@ -791,14 +791,13 @@ def get_audit_log():
 @app.route("/api/passports", methods=["GET"])
 @require_auth
 def list_passports():
-    from flask import Response as FlaskResponse
-    tenant_id = request.current_user.get("tenant_id")
-    if not tenant_id:
-        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
-    conn = get_db()
-    if not conn:
-        return jsonify({"error": "База данни не е конфигурирана"}), 503
     try:
+        tenant_id = request.current_user.get("tenant_id")
+        if not tenant_id:
+            return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
+        conn = get_db()
+        if not conn:
+            return jsonify({"error": "База данни не е конфигурирана"}), 503
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT pi, stroej, address, consultant, passport, created_at, updated_at "
@@ -823,8 +822,8 @@ def list_passports():
         def _default(o):
             if isinstance(o, datetime): return o.isoformat()
             return str(o)
-        return FlaskResponse(json.dumps(result, default=_default),
-                             mimetype="application/json")
+        from flask import Response as FlaskResponse
+        return FlaskResponse(json.dumps(result, default=_default), mimetype="application/json")
     except Exception as e:
         import traceback
         return jsonify({"error": str(e), "type": type(e).__name__,
@@ -851,17 +850,17 @@ def get_passport(pi):
 @app.route("/api/passports/<pi>", methods=["POST"])
 @require_auth
 def save_passport(pi):
-    tenant_id = request.current_user.get("tenant_id")
-    if not tenant_id:
-        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
-    body = request.get_json()
-    if not body or "passport" not in body:
-        return jsonify({"error": "Липсва поле 'passport'"}), 400
-    passport = body["passport"]
-    conn = get_db()
-    if not conn:
-        return jsonify({"error": "База данни не е конфигурирана"}), 503
     try:
+        tenant_id = request.current_user.get("tenant_id")
+        if not tenant_id:
+            return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
+        body = request.get_json()
+        if not body or "passport" not in body:
+            return jsonify({"error": "Липсва поле 'passport'"}), 400
+        passport = body["passport"]
+        conn = get_db()
+        if not conn:
+            return jsonify({"error": "База данни не е конфигурирана"}), 503
         stroej     = passport.get("stroej", "") if isinstance(passport, dict) else ""
         address    = passport.get("address", "") if isinstance(passport, dict) else ""
         consultant = (passport.get("consultant") or {}).get("name", "") if isinstance(passport, dict) else ""
@@ -880,7 +879,9 @@ def save_passport(pi):
                    detail={"pi": pi})
         return jsonify({"status": "ok", "pi": pi, "tenant_id": tenant_id})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        import traceback
+        return jsonify({"error": str(e), "type": type(e).__name__,
+                        "trace": traceback.format_exc()}), 500
 
 @app.route("/api/generate/<doc_type>", methods=["POST"])
 @require_auth
