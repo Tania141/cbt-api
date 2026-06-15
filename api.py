@@ -15,6 +15,9 @@ from dropbox.files import WriteMode
 import anthropic
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import bcrypt
+import jwt
+from functools import wraps
 
 app = Flask(__name__)
 CORS(app, origins=[
@@ -25,6 +28,8 @@ CORS(app, origins=[
 ])
 
 DATABASE_URL          = os.environ.get("DATABASE_URL", "")
+JWT_SECRET            = os.environ.get("JWT_SECRET", "change-me-in-production")
+JWT_EXPIRY_HOURS      = int(os.environ.get("JWT_EXPIRY_HOURS", "24"))
 
 DROPBOX_TOKEN         = os.environ.get("DROPBOX_TOKEN", "")
 DROPBOX_REFRESH_TOKEN = os.environ.get("DROPBOX_REFRESH_TOKEN", "")
@@ -107,6 +112,18 @@ def init_db():
                     doc_type    TEXT,
                     detail      TEXT,
                     created_at  TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id            SERIAL PRIMARY KEY,
+                    email         TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    role          TEXT NOT NULL DEFAULT 'viewer'
+                                  CHECK (role IN ('admin', 'operator', 'viewer')),
+                    tenant_id     TEXT,
+                    created_at    TIMESTAMPTZ DEFAULT NOW(),
+                    is_active     BOOLEAN NOT NULL DEFAULT TRUE
                 )
             """)
     conn.close()
@@ -442,6 +459,34 @@ def generate_from_template(dbx, template_name, replacements):
     fill_template(doc, replacements)
     buf = io.BytesIO(); doc.save(buf); return buf.getvalue()
 
+# ── Auth helpers ─────────────────────────────────────────────────────────────
+def make_token(user):
+    from datetime import timezone, timedelta
+    payload = {
+        "sub":       str(user["id"]),
+        "email":     user["email"],
+        "role":      user["role"],
+        "tenant_id": user["tenant_id"],
+        "exp":       datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+def require_auth(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return jsonify({"error": "Липсва Authorization header"}), 401
+        try:
+            payload = jwt.decode(auth[7:], JWT_SECRET, algorithms=["HS256"])
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Токенът е изтекъл"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Невалиден токен"}), 401
+        request.current_user = payload
+        return f(*args, **kwargs)
+    return wrapper
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/health", methods=["GET"])
 def health():
@@ -482,6 +527,90 @@ def health():
         "ai": "конфигуриран" if ANTHROPIC_API_KEY else "не е конфигуриран",
         "database": "свързан" if db_ok else ("не е конфигуриран" if not DATABASE_URL else f"грешка: {db_error}"),
     })
+
+@app.route("/api/auth/register", methods=["POST"])
+def auth_register():
+    body = request.get_json()
+    if not body or not body.get("email") or not body.get("password"):
+        return jsonify({"error": "Необходими са email и password"}), 400
+
+    role      = body.get("role", "viewer")
+    tenant_id = body.get("tenant_id")
+    if role not in ("admin", "operator", "viewer"):
+        return jsonify({"error": "Невалидна роля. Позволени: admin, operator, viewer"}), 400
+
+    pw_hash = bcrypt.hashpw(body["password"].encode(), bcrypt.gensalt()).decode()
+
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO users (email, password_hash, role, tenant_id)
+                       VALUES (%s, %s, %s, %s) RETURNING id, email, role, tenant_id, created_at""",
+                    (body["email"].lower().strip(), pw_hash, role, tenant_id)
+                )
+                user = dict(cur.fetchone())
+        return jsonify({"status": "ok", "user": user}), 201
+    except psycopg2.errors.UniqueViolation:
+        return jsonify({"error": "Email вече е регистриран"}), 409
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    body = request.get_json()
+    if not body or not body.get("email") or not body.get("password"):
+        return jsonify({"error": "Необходими са email и password"}), 400
+
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM users WHERE email = %s",
+                (body["email"].lower().strip(),)
+            )
+            user = cur.fetchone()
+        if not user or not bcrypt.checkpw(body["password"].encode(), user["password_hash"].encode()):
+            return jsonify({"error": "Невалиден email или парола"}), 401
+        if not user["is_active"]:
+            return jsonify({"error": "Акаунтът е деактивиран"}), 403
+        token = make_token(user)
+        return jsonify({"status": "ok", "token": token, "role": user["role"]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/auth/me", methods=["GET"])
+@require_auth
+def auth_me():
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, email, role, tenant_id, created_at, is_active FROM users WHERE id = %s",
+                (request.current_user["sub"],)
+            )
+            user = cur.fetchone()
+        if not user:
+            return jsonify({"error": "Потребителят не е намерен"}), 404
+        return jsonify(dict(user))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
 
 @app.route("/api/passports", methods=["GET"])
 def list_passports():
