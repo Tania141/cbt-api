@@ -613,6 +613,7 @@ def auth_me():
 
 
 @app.route("/api/passports", methods=["GET"])
+@require_auth
 def list_passports():
     dbx = get_dropbox()
     if not dbx: return jsonify({"error": "Dropbox не е конфигуриран"}), 503
@@ -632,6 +633,7 @@ def list_passports():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/passports/<pi>", methods=["GET"])
+@require_auth
 def get_passport(pi):
     dbx = get_dropbox()
     if not dbx: return jsonify({"error": "Dropbox не е конфигуриран"}), 503
@@ -644,6 +646,7 @@ def get_passport(pi):
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/passports/<pi>", methods=["POST"])
+@require_auth
 def save_passport(pi):
     dbx = get_dropbox()
     if not dbx: return jsonify({"error": "Dropbox не е конфигуриран"}), 503
@@ -660,6 +663,7 @@ def save_passport(pi):
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/generate/<doc_type>", methods=["POST"])
+@require_auth
 def generate_document(doc_type):
     if doc_type not in TEMPLATE_FILES:
         return jsonify({"error": f"Непознат тип: {doc_type}. Позволени: {list(TEMPLATE_FILES.keys())}"}), 400
@@ -697,6 +701,7 @@ def generate_document(doc_type):
 
 # ── Cloud Sync ────────────────────────────────────────────────────────────────
 @app.route("/api/cloud/save", methods=["POST"])
+@require_auth
 def cloud_save():
     dbx = get_dropbox()
     if not dbx:
@@ -713,6 +718,7 @@ def cloud_save():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/cloud/load", methods=["GET"])
+@require_auth
 def cloud_load():
     dbx = get_dropbox()
     if not dbx:
