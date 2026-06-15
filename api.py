@@ -638,32 +638,6 @@ def auth_me():
         conn.close()
 
 
-@app.route("/api/setup/reset", methods=["POST"])
-def setup_reset():
-    setup_secret = os.environ.get("SETUP_SECRET", "")
-    if not setup_secret:
-        return jsonify({"error": "SETUP_SECRET не е конфигуриран на сървъра"}), 503
-    body = request.get_json()
-    if not body or body.get("secret") != setup_secret:
-        return jsonify({"error": "Невалиден secret"}), 403
-    conn = get_db()
-    if not conn:
-        return jsonify({"error": "База данни не е свързана"}), 503
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM users")
-                cur.execute("DELETE FROM tenants")
-                cur.execute("SELECT COUNT(*) AS users FROM users")
-                users_left = cur.fetchone()["users"]
-                cur.execute("SELECT COUNT(*) AS tenants FROM tenants")
-                tenants_left = cur.fetchone()["tenants"]
-        return jsonify({"status": "ok", "users_remaining": users_left, "tenants_remaining": tenants_left})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
-
 
 @app.route("/api/setup/init", methods=["POST"])
 def setup_init():
