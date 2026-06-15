@@ -791,6 +791,7 @@ def get_audit_log():
 @app.route("/api/passports", methods=["GET"])
 @require_auth
 def list_passports():
+    from flask import Response as FlaskResponse
     tenant_id = request.current_user.get("tenant_id")
     if not tenant_id:
         return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
@@ -819,9 +820,15 @@ def list_passports():
             result.append(entry)
         log_action("get_passports", user_id=request.current_user["sub"], tenant_id=tenant_id,
                    detail={"count": len(result)})
-        return jsonify(result)
+        def _default(o):
+            if isinstance(o, datetime): return o.isoformat()
+            return str(o)
+        return FlaskResponse(json.dumps(result, default=_default),
+                             mimetype="application/json")
     except Exception as e:
-        return jsonify({"error": str(e), "type": type(e).__name__}), 500
+        import traceback
+        return jsonify({"error": str(e), "type": type(e).__name__,
+                        "trace": traceback.format_exc()}), 500
 
 @app.route("/api/passports/<pi>", methods=["GET"])
 @require_auth
