@@ -36,8 +36,9 @@ DROPBOX_REFRESH_TOKEN = os.environ.get("DROPBOX_REFRESH_TOKEN", "")
 DROPBOX_APP_KEY       = os.environ.get("DROPBOX_APP_KEY", "")
 DROPBOX_APP_SECRET    = os.environ.get("DROPBOX_APP_SECRET", "")
 DROPBOX_FOLDER        = os.environ.get("DROPBOX_FOLDER", "/AKT_Projects")
-TEMPLATES_FOLDER      = os.environ.get("TEMPLATES_FOLDER", "/AKT_Templates")
 ANTHROPIC_API_KEY     = os.environ.get("ANTHROPIC_API_KEY", "")
+
+LOCAL_TEMPLATES_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
 TEMPLATE_FILES = {
     "protokol2":   "Protokol_2_Template.docx",
@@ -488,13 +489,11 @@ def fill_template(doc, replacements):
             replace_in_runs(para, replacements)
     return doc
 
-def generate_from_template(dbx, template_name, replacements):
-    path = f"{TEMPLATES_FOLDER}/{template_name}"
-    try:
-        tpl_bytes = dbx_download(dbx, path)
-    except ApiError:
-        raise FileNotFoundError(f"Шаблонът '{template_name}' липсва в Dropbox → {path}")
-    doc = Document(io.BytesIO(tpl_bytes))
+def generate_from_template(template_name, replacements):
+    path = os.path.join(LOCAL_TEMPLATES_DIR, template_name)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Шаблонът '{template_name}' липсва локално → {path}")
+    doc = Document(path)
     fill_template(doc, replacements)
     buf = io.BytesIO(); doc.save(buf); return buf.getvalue()
 
@@ -545,13 +544,9 @@ def health():
         except: pass
 
     templates = {}
-    if dbx_ok:
-        for key, fname in TEMPLATE_FILES.items():
-            try:
-                dbx.files_get_metadata(f"{TEMPLATES_FOLDER}/{fname}")
-                templates[key] = f"OK ({fname})"
-            except:
-                templates[key] = f"ЛИПСВА ({fname})"
+    for key, fname in TEMPLATE_FILES.items():
+        local_path = os.path.join(LOCAL_TEMPLATES_DIR, fname)
+        templates[key] = f"OK ({fname})" if os.path.isfile(local_path) else f"ЛИПСВА ({fname})"
 
     db_ok = False
     db_error = None
@@ -570,7 +565,7 @@ def health():
         "timestamp": datetime.utcnow().isoformat(),
         "dropbox": "свързан" if dbx_ok else "не е свързан",
         "dropbox_folder": DROPBOX_FOLDER,
-        "templates_folder": TEMPLATES_FOLDER,
+        "templates_dir": LOCAL_TEMPLATES_DIR,
         "templates": templates,
         "ai": "конфигуриран" if ANTHROPIC_API_KEY else "не е конфигуриран",
         "database": "свързан" if db_ok else ("не е конфигуриран" if not DATABASE_URL else f"грешка: {db_error}"),
@@ -891,7 +886,7 @@ def generate_document(doc_type):
     path     = f"{folder}/{filename}"
 
     try:
-        doc_bytes = generate_from_template(dbx, TEMPLATE_FILES[doc_type], repl)
+        doc_bytes = generate_from_template(TEMPLATE_FILES[doc_type], repl)
         dbx_create_folder(dbx, folder)
         dbx_upload(dbx, path, doc_bytes)
         file_url = get_shared_link(dbx, path)
@@ -901,7 +896,7 @@ def generate_document(doc_type):
                         "filename": filename, "path": path, "file_url": file_url})
     except FileNotFoundError as e:
         return jsonify({"error": str(e),
-                        "hint": f"Качи шаблона в Dropbox → {TEMPLATES_FOLDER}/"}), 404
+                        "hint": f"Постави шаблона в папка: {LOCAL_TEMPLATES_DIR}"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
