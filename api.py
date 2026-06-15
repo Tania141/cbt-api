@@ -20,12 +20,7 @@ import jwt
 from functools import wraps
 
 app = Flask(__name__)
-CORS(app, origins=[
-    "https://tania141.github.io",
-    "http://localhost",
-    "http://127.0.0.1",
-    "null"  # file:// local files
-])
+CORS(app, origins="*")
 
 DATABASE_URL          = os.environ.get("DATABASE_URL", "")
 JWT_SECRET            = os.environ.get("JWT_SECRET", "change-me-in-production")
