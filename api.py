@@ -564,6 +564,7 @@ def health():
         "templates": templates,
         "ai": "конфигуриран" if ANTHROPIC_API_KEY else "не е конфигуриран",
         "database": "свързан" if db_ok else ("не е конфигуриран" if not DATABASE_URL else f"грешка: {db_error}"),
+        "build": "10af59c",
     })
 
 @app.route("/api/auth/register", methods=["POST"])
