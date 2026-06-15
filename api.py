@@ -119,9 +119,13 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id          SERIAL PRIMARY KEY,
                     action      TEXT NOT NULL,
-                    pi          TEXT,
-                    doc_type    TEXT,
-                    detail      TEXT,
+                    user_id     TEXT,
+                    tenant_id   TEXT,
+                    endpoint    TEXT,
+                    method      TEXT,
+                    ip_address  TEXT,
+                    user_agent  TEXT,
+                    detail      JSONB,
                     created_at  TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
@@ -140,7 +144,7 @@ def init_db():
     conn.close()
     print("PostgreSQL: таблиците са готови")
 
-def db_log(action, pi=None, doc_type=None, detail=None):
+def log_action(action, user_id=None, tenant_id=None, detail=None):
     conn = get_db()
     if not conn:
         return
@@ -148,9 +152,22 @@ def db_log(action, pi=None, doc_type=None, detail=None):
         with conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO audit_log (action, pi, doc_type, detail) VALUES (%s, %s, %s, %s)",
-                    (action, pi, doc_type, detail)
+                    """INSERT INTO audit_log
+                       (action, user_id, tenant_id, endpoint, method, ip_address, user_agent, detail)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        action,
+                        str(user_id) if user_id else None,
+                        str(tenant_id) if tenant_id else None,
+                        request.path,
+                        request.method,
+                        request.headers.get("X-Forwarded-For", request.remote_addr),
+                        request.headers.get("User-Agent", ""),
+                        json.dumps(detail, ensure_ascii=False) if detail else None,
+                    )
                 )
+    except Exception:
+        pass  # audit failures must never break the main request
     finally:
         conn.close()
 
@@ -609,6 +626,8 @@ def auth_login():
         if not user["is_active"]:
             return jsonify({"error": "Акаунтът е деактивиран"}), 403
         token = make_token(user)
+        log_action("login", user_id=user["id"], tenant_id=user["tenant_id"],
+                   detail={"email": user["email"], "role": user["role"]})
         return jsonify({"status": "ok", "token": token, "role": user["role"]})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -631,12 +650,13 @@ def auth_me():
             user = cur.fetchone()
         if not user:
             return jsonify({"error": "Потребителят не е намерен"}), 404
+        log_action("get_me", user_id=request.current_user["sub"],
+                   tenant_id=request.current_user.get("tenant_id"))
         return jsonify(dict(user))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
         conn.close()
-
 
 
 @app.route("/api/setup/init", methods=["POST"])
@@ -724,6 +744,49 @@ def list_tenants():
         conn.close()
 
 
+@app.route("/api/admin/audit-log", methods=["GET"])
+@require_admin
+def get_audit_log():
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        filters, params = [], []
+
+        user_id   = request.args.get("user_id")
+        action    = request.args.get("action")
+        date_from = request.args.get("date_from")
+        date_to   = request.args.get("date_to")
+
+        if user_id:
+            filters.append("user_id = %s");   params.append(user_id)
+        if action:
+            filters.append("action = %s");    params.append(action)
+        if date_from:
+            filters.append("created_at >= %s"); params.append(date_from)
+        if date_to:
+            filters.append("created_at <= %s"); params.append(date_to)
+
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        params.append(100)
+
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""SELECT id, action, user_id, tenant_id, endpoint, method,
+                           ip_address, user_agent, detail, created_at
+                    FROM audit_log {where}
+                    ORDER BY created_at DESC
+                    LIMIT %s""",
+                params
+            )
+            entries = [dict(r) for r in cur.fetchall()]
+        return jsonify({"entries": entries, "count": len(entries)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
 @app.route("/api/passports", methods=["GET"])
 @require_auth
 def list_passports():
@@ -744,6 +807,8 @@ def list_passports():
                     result.append({"pi": p.get("ПИ",""), "stroej": p.get("Строеж",""),
                                    "address": p.get("Адрес",""), "consultant": p.get("Консултант_Фирма","")})
                 except: pass
+        log_action("get_passports", user_id=request.current_user["sub"], tenant_id=tenant_id,
+                   detail={"count": len(result)})
         return jsonify({"passports": result, "count": len(result), "tenant_id": tenant_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -758,6 +823,8 @@ def get_passport(pi):
     if not dbx: return jsonify({"error": "Dropbox не е конфигуриран"}), 503
     try:
         data = dbx_download(dbx, f"{DROPBOX_FOLDER}/{tenant_id}/PI-{pi}/passport.xlsx")
+        log_action("get_passport", user_id=request.current_user["sub"], tenant_id=tenant_id,
+                   detail={"pi": pi})
         return jsonify({"pi": pi, "tenant_id": tenant_id, "passport": read_passport_excel(data)})
     except ApiError:
         return jsonify({"error": f"Паспорт PI-{pi} не е намерен"}), 404
@@ -780,6 +847,8 @@ def save_passport(pi):
     try:
         dbx_create_folder(dbx, folder)
         dbx_upload(dbx, path, build_passport_excel(body["passport"]))
+        log_action("save_passport", user_id=request.current_user["sub"], tenant_id=tenant_id,
+                   detail={"pi": pi, "path": path})
         return jsonify({"status": "ok", "pi": pi, "tenant_id": tenant_id, "path": path})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -815,6 +884,8 @@ def generate_document(doc_type):
         dbx_create_folder(dbx, folder)
         dbx_upload(dbx, path, doc_bytes)
         file_url = get_shared_link(dbx, path)
+        log_action("generate_doc", user_id=request.current_user["sub"], tenant_id=tenant_id,
+                   detail={"doc_type": doc_type, "pi": pi, "filename": filename})
         return jsonify({"status": "ok", "doc_type": doc_type, "pi": pi,
                         "filename": filename, "path": path, "file_url": file_url})
     except FileNotFoundError as e:
@@ -841,6 +912,8 @@ def cloud_save():
     try:
         data = json.dumps(body, ensure_ascii=False, indent=2).encode('utf-8')
         dbx_upload(dbx, path, data)
+        log_action("cloud_save", user_id=request.current_user["sub"], tenant_id=tenant_id,
+                   detail={"path": path})
         return jsonify({"status": "ok", "path": path})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -858,6 +931,7 @@ def cloud_load():
     try:
         data = dbx_download(dbx, path)
         payload = json.loads(data.decode('utf-8'))
+        log_action("cloud_load", user_id=request.current_user["sub"], tenant_id=tenant_id)
         return jsonify(payload)
     except Exception:
         return jsonify({"projects": [], "consultants": [], "history": []}), 200
