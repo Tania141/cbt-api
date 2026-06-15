@@ -125,6 +125,25 @@ def init_db():
                     created_at  TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            # Migrate projects table — add columns introduced after initial deploy
+            for col, typedef in [
+                ("tenant_id",  "TEXT NOT NULL DEFAULT '1'"),
+                ("consultant", "TEXT"),
+                ("passport",   "JSONB"),
+                ("updated_at", "TIMESTAMPTZ DEFAULT NOW()"),
+            ]:
+                cur.execute(f"ALTER TABLE projects ADD COLUMN IF NOT EXISTS {col} {typedef}")
+            # Add UNIQUE constraint if missing (idempotent via DO NOTHING)
+            cur.execute("""
+                DO $$ BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'projects_pi_tenant_id_key'
+                    ) THEN
+                        ALTER TABLE projects ADD CONSTRAINT projects_pi_tenant_id_key UNIQUE (pi, tenant_id);
+                    END IF;
+                END $$
+            """)
             # Migrate existing audit_log tables that have the old schema
             for col, typedef in [
                 ("user_id",    "TEXT"),
