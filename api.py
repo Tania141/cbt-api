@@ -794,23 +794,32 @@ def list_passports():
     tenant_id = request.current_user.get("tenant_id")
     if not tenant_id:
         return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
-    dbx = get_dropbox()
-    if not dbx: return jsonify({"error": "Dropbox не е конфигуриран"}), 503
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е конфигурирана"}), 503
     try:
-        tenant_folder = f"{DROPBOX_FOLDER}/{tenant_id}"
-        entries = dbx_list_folder(dbx, tenant_folder)
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pi, stroej, address, consultant, passport, created_at, updated_at "
+                    "FROM projects WHERE tenant_id = %s ORDER BY updated_at DESC",
+                    (str(tenant_id),)
+                )
+                rows = cur.fetchall()
         result = []
-        for e in entries:
-            if hasattr(e, "path_display") and not e.path_display.endswith(".xlsx"):
-                try:
-                    data = dbx_download(dbx, f"{e.path_display}/passport.xlsx")
-                    p = read_passport_excel(data)
-                    result.append({"pi": p.get("ПИ",""), "stroej": p.get("Строеж",""),
-                                   "address": p.get("Адрес",""), "consultant": p.get("Консултант_Фирма","")})
-                except: pass
+        for r in rows:
+            entry = dict(r.get("passport") or {})
+            entry["pi"]         = r["pi"]
+            entry["stroej"]     = r["stroej"] or ""
+            entry["address"]    = r["address"] or ""
+            entry["consultant"] = r["consultant"] or ""
+            entry["createdAt"]  = r["created_at"].isoformat() if r["created_at"] else None
+            entry["updatedAt"]  = r["updated_at"].isoformat() if r["updated_at"] else None
+            result.append(entry)
+        conn.close()
         log_action("get_passports", user_id=request.current_user["sub"], tenant_id=tenant_id,
                    detail={"count": len(result)})
-        return jsonify({"passports": result, "count": len(result), "tenant_id": tenant_id})
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -838,19 +847,31 @@ def save_passport(pi):
     tenant_id = request.current_user.get("tenant_id")
     if not tenant_id:
         return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
-    dbx = get_dropbox()
-    if not dbx: return jsonify({"error": "Dropbox не е конфигуриран"}), 503
     body = request.get_json()
     if not body or "passport" not in body:
         return jsonify({"error": "Липсва поле 'passport'"}), 400
-    folder = f"{DROPBOX_FOLDER}/{tenant_id}/PI-{pi}"
-    path   = f"{folder}/passport.xlsx"
+    passport = body["passport"]
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е конфигурирана"}), 503
     try:
-        dbx_create_folder(dbx, folder)
-        dbx_upload(dbx, path, build_passport_excel(body["passport"]))
+        stroej     = passport.get("stroej", "") if isinstance(passport, dict) else ""
+        address    = passport.get("address", "") if isinstance(passport, dict) else ""
+        consultant = (passport.get("consultant") or {}).get("name", "") if isinstance(passport, dict) else ""
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO projects (pi, tenant_id, stroej, address, consultant, passport, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, NOW())
+                    ON CONFLICT (pi, tenant_id) DO UPDATE
+                        SET stroej = EXCLUDED.stroej, address = EXCLUDED.address,
+                            consultant = EXCLUDED.consultant, passport = EXCLUDED.passport,
+                            updated_at = NOW()
+                """, (pi, str(tenant_id), stroej, address, consultant, json.dumps(passport)))
+        conn.close()
         log_action("save_passport", user_id=request.current_user["sub"], tenant_id=tenant_id,
-                   detail={"pi": pi, "path": path})
-        return jsonify({"status": "ok", "pi": pi, "tenant_id": tenant_id, "path": path})
+                   detail={"pi": pi})
+        return jsonify({"status": "ok", "pi": pi, "tenant_id": tenant_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1030,6 +1051,35 @@ def ai_generate():
             "output_tokens": response.usage.output_tokens,
         })
 
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Claude API грешка: {str(e)}"}), 502
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ai/chat", methods=["POST"])
+def ai_chat():
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
+    body = request.get_json()
+    if not body or "messages" not in body:
+        return jsonify({"error": "Липсва поле 'messages'"}), 400
+    messages     = body["messages"]
+    system_prompt = body.get("system", "")
+    max_tokens   = int(body.get("max_tokens", 4000))
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        kwargs = dict(model="claude-sonnet-4-6", max_tokens=max_tokens, messages=messages)
+        if system_prompt:
+            kwargs["system"] = system_prompt
+        response = client.messages.create(**kwargs)
+        result_text = "".join(b.text for b in response.content if hasattr(b, "text"))
+        return jsonify({
+            "status": "ok",
+            "result": result_text,
+            "input_tokens":  response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+        })
     except anthropic.APIError as e:
         return jsonify({"error": f"Claude API грешка: {str(e)}"}), 502
     except Exception as e:
