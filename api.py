@@ -638,6 +638,47 @@ def auth_me():
         conn.close()
 
 
+@app.route("/api/setup/init", methods=["POST"])
+def setup_init():
+    body = request.get_json()
+    required = ("tenant_name", "tenant_email", "admin_email", "admin_password")
+    if not body or any(not body.get(k) for k in required):
+        return jsonify({"error": f"Необходими полета: {', '.join(required)}"}), 400
+
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM users")
+            if cur.fetchone()["n"] > 0:
+                return jsonify({"error": "Системата вече е инициализирана"}), 403
+
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO tenants (name, email) VALUES (%s, %s) RETURNING id, name, email",
+                    (body["tenant_name"].strip(), body["tenant_email"].lower().strip())
+                )
+                tenant = dict(cur.fetchone())
+
+                pw_hash = bcrypt.hashpw(body["admin_password"].encode(), bcrypt.gensalt()).decode()
+                cur.execute(
+                    """INSERT INTO users (email, password_hash, role, tenant_id)
+                       VALUES (%s, %s, 'admin', %s) RETURNING id, email, role, tenant_id""",
+                    (body["admin_email"].lower().strip(), pw_hash, str(tenant["id"]))
+                )
+                admin = dict(cur.fetchone())
+
+        return jsonify({"status": "ok", "tenant": tenant, "admin": admin}), 201
+    except psycopg2.errors.UniqueViolation:
+        return jsonify({"error": "Tenant email или admin email вече съществуват"}), 409
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
 @app.route("/api/admin/tenants", methods=["POST"])
 @require_admin
 def create_tenant():
