@@ -373,8 +373,9 @@ def build_placeholders(d):
     teh_ryk = d.get("Строител_ТехРък", "")
     str_upr = d.get("Строител_Управител", "")
     vaz_pr  = d.get("Възложител_Представител", "")
-    # For ФЛ, Възложител_1и3 is the client's own name; for ЮЛ it's the representative
-    vaz_name_for_1i3 = d.get("Възложител_Фирма", "") if vaz_tip in ("Физическо лице", "ФЛ") else vaz_pr
+    # Възложител_1и3: prefer explicit signing person, fall back to ФЛ name or representative
+    vaz_podpisva = d.get("Възложител_Подписва", "")
+    vaz_name_for_1i3 = vaz_podpisva or (d.get("Възложител_Фирма", "") if vaz_tip in ("Физическо лице", "ФЛ") else vaz_pr)
 
     return {
         "{{Строеж}}":                    d.get("Строеж",""),
