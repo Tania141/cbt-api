@@ -1126,6 +1126,88 @@ def ai_chat():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/ai/extract-protokol2", methods=["POST"])
+@require_auth
+def ai_extract_protokol2():
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
+
+    body = request.get_json()
+    if not body:
+        return jsonify({"error": "Липсва тяло на заявката"}), 400
+
+    files     = body.get("files", [])
+    pi        = str(body.get("pi", "unknown"))
+    tenant_id = request.current_user.get("tenant_id")
+    user_id   = request.current_user.get("sub")
+
+    extract_prompt = """Ти си експерт по Bulgarian строителна документация. Анализирай приложените PDF файлове (Разрешение за строеж и/или одобрен архитектурен проект) и извлечи следните стойности.
+
+Върни САМО валиден JSON обект — без markdown, без ```json, без обяснения. Ако дадена стойност не може да бъде намерена в документите, върни null за нея.
+
+{
+  "Opisanie_Ploshtadka": "<описание на сградата от архитектурните бележки: брой етажи, застроена площ, разстояния до регулация, конструктивна схема, височина>",
+  "Kota_Izkop": "<кота изкоп в метри, напр. -2.50>",
+  "Kota_Cokul": "<абсолютна кота ±0.00 в метри, напр. 142.50>",
+  "Kota_Korniz": "<кота корниз/стреха в метри, напр. +9.80>",
+  "Kota_Bilo": "<кота було/Ridge в метри, напр. +12.40>",
+  "Reper_Nomer": "<номер на нивелетен репер, напр. РП-23 или Репер №5>",
+  "Reper_Kota": "<кота на репера в метри, напр. 143.750>",
+  "Darvesenost": null
+}"""
+
+    content = []
+    for f in files:
+        if f.get("media_type") == "application/pdf" and f.get("data"):
+            content.append({
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": f["data"]
+                }
+            })
+    content.append({"type": "text", "text": extract_prompt})
+
+    if not any(c["type"] == "document" for c in content):
+        return jsonify({"error": "Не са предоставени PDF файлове за анализ"}), 400
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": content}]
+        )
+
+        raw = "".join(b.text for b in response.content if hasattr(b, "text")).strip()
+
+        try:
+            extracted = json.loads(raw)
+        except json.JSONDecodeError:
+            import re as _re
+            m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+            if m:
+                extracted = json.loads(m.group())
+            else:
+                return jsonify({"error": "Claude не върна валиден JSON", "raw": raw}), 502
+
+        log_action("ai_extract_protokol2", user_id=user_id, tenant_id=tenant_id,
+                   detail=f"PI={pi} tokens={response.usage.input_tokens}+{response.usage.output_tokens}")
+
+        return jsonify({
+            "status": "ok",
+            "extracted": extracted,
+            "input_tokens":  response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+        })
+
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Claude API грешка: {str(e)}"}), 502
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── AI Валидация ──────────────────────────────────────────────────────────────
 VALIDATION_SYSTEM_PROMPT = """Ти си експерт по българското строително законодателство, специализиран в Наредба №3 от 2003 г. за съставяне на актове и протоколи по време на строителство.
 
