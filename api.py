@@ -404,8 +404,10 @@ def build_placeholders(d):
         "{{Възложител_Представител}}":   vaz_pr if vaz_tip not in ("Физическо лице","ФЛ") else "",
         "{{Възложител_2имена}}":         two_names(vaz_name_for_1i3),
         "{{Възложител_1и3}}":           one_and_three(vaz_name_for_1i3),
-        "{{Възложател_Блок}}":           build_vazlogitel_block(d),
-        "{{Възложател_Подписва_Блок}}":  d.get("Възложител_Подписва", "") or build_vazlogitel_block(d),
+        "{{Възложител_Блок}}":           build_vazlogitel_block(d),   # и (correct, matches template)
+        "{{Възложател_Блок}}":           build_vazlogitel_block(d),   # а (legacy alias)
+        "{{Възложител_Подписва_Блок}}":  d.get("Възложител_Подписва", "") or build_vazlogitel_block(d),  # и
+        "{{Възложател_Подписва_Блок}}":  d.get("Възложател_Подписва", "") or build_vazlogitel_block(d),  # а
         "{{РС_Номер}}":                  d.get("РС_Номер",""),
         "{{РС_Дата}}":                   fmt_date(d.get("РС_Дата","")),
         "{{РС_Издател}}":                d.get("РС_Издател",""),
