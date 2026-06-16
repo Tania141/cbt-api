@@ -424,6 +424,7 @@ def build_placeholders(d):
         "{{СН_Пътна}}":                  (by_spec(employees, "Пътна") or [{}])[0].get("name", ""),
         "{{СН_ОВК}}":                    (by_spec(employees, "ОВК и ЕЕ") or [{}])[0].get("name", ""),
         "{{pj_konstruktivna}}":          pj_k,
+        "{{Конструктивна}}":             pj_k,
         "{{ПЖ_Конструктивна}}":          pj_k,
         "{{ПЖ_Архитектура}}":            pj_arch,
         "{{Вода}}":                      d.get("Вода", ""),
@@ -939,6 +940,10 @@ def generate_document(doc_type):
     d    = rows_to_dict(body["passport"])
     pi   = str(body.get("pi", "unknown"))
     repl = build_placeholders(d)
+
+    if doc_type == "protokol2combined":
+        print(f"[DEBUG protokol2combined] PI={pi} keys={sorted(d.keys())}", flush=True)
+        print(f"[DEBUG protokol2combined] Геодезист={d.get('Геодезист','MISSING')} ПЖ_Конструктивна={repl.get('{{ПЖ_Конструктивна}}','MISSING')} ПЖ_Архитектура={repl.get('{{ПЖ_Архитектура}}','MISSING')}", flush=True)
 
     if doc_type == "zapovedna":
         repl["{{Заповедна_Номер}}"] = body.get("zapovedna_number", "___")
