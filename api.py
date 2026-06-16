@@ -366,12 +366,15 @@ def build_placeholders(d):
     geo     = (by_spec(employees, "Геодезия") or [{}])[0].get("name", d.get("Геодезист",""))
     sn_k    = (by_spec(employees, "Конструктивна") or [{}])[0].get("name", "")
     pj_k    = (by_spec(projectants, "Конструктивна") or [{}])[0].get("name", "")
+    pj_arch = (by_spec(projectants, "Архитектура") or [{}])[0].get("name", "")
     specs   = "; ".join(f"{e['title']} {e['name']} ({e['specialization']})" for e in employees) or d.get("Консултант_Управител","")
     vaz_tip = d.get("Възложител_Тип", "Фирма")
     upr     = d.get("Консултант_Управител", "")
     teh_ryk = d.get("Строител_ТехРък", "")
     str_upr = d.get("Строител_Управител", "")
     vaz_pr  = d.get("Възложител_Представител", "")
+    # For ФЛ, Възложител_1и3 is the client's own name; for ЮЛ it's the representative
+    vaz_name_for_1i3 = d.get("Възложител_Фирма", "") if vaz_tip in ("Физическо лице", "ФЛ") else vaz_pr
 
     return {
         "{{Строеж}}":                    d.get("Строеж",""),
@@ -398,8 +401,8 @@ def build_placeholders(d):
         "{{Възложител_ЕИК}}":            d.get("Възложител_ЕИК","") if vaz_tip not in ("Физическо лице","ФЛ") else "",
         "{{Възложител_Адрес}}":          d.get("Възложител_Адрес",""),
         "{{Възложител_Представител}}":   vaz_pr if vaz_tip not in ("Физическо лице","ФЛ") else "",
-        "{{Възложител_2имена}}":         two_names(vaz_pr),
-        "{{Възложител_1и3}}":           one_and_three(vaz_pr),
+        "{{Възложител_2имена}}":         two_names(vaz_name_for_1i3),
+        "{{Възложител_1и3}}":           one_and_three(vaz_name_for_1i3),
         "{{Възложител_Блок}}":           build_vazlogitel_block(d),
         "{{РС_Номер}}":                  d.get("РС_Номер",""),
         "{{РС_Дата}}":                   fmt_date(d.get("РС_Дата","")),
@@ -420,6 +423,11 @@ def build_placeholders(d):
         "{{СН_Пътна}}":                  (by_spec(employees, "Пътна") or [{}])[0].get("name", ""),
         "{{СН_ОВК}}":                    (by_spec(employees, "ОВК и ЕЕ") or [{}])[0].get("name", ""),
         "{{pj_konstruktivna}}":          pj_k,
+        "{{ПЖ_Конструктивна}}":          pj_k,
+        "{{ПЖ_Архитектура}}":            pj_arch,
+        "{{Вода}}":                      d.get("Вода", ""),
+        "{{Канализация}}":               d.get("Канализация", ""),
+        "{{Ел_Захранване}}":             d.get("Ел_Захранване", ""),
         "{{Проектанти_Списък}}":         build_projectants_list(projectants),
         "{{Консултанти_Списък}}":        build_employees_list(employees),
         "{{Проектанти_Подписи}}":        build_projectants_signatures(projectants),
