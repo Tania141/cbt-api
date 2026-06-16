@@ -36,9 +36,10 @@ ANTHROPIC_API_KEY     = os.environ.get("ANTHROPIC_API_KEY", "")
 LOCAL_TEMPLATES_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
 TEMPLATE_FILES = {
-    "protokol2":   "Protokol_2_Template.docx",
-    "protokol2p2": "Protokol_2_Part2_Template.docx",
-    "protokol2a":  "Protokol_2a_Template.docx",
+    "protokol2":         "Protokol_2_Template.docx",
+    "protokol2combined": "Protokol_2_Combined_Template.docx",
+    "protokol2p2":       "Protokol_2_Part2_Template.docx",
+    "protokol2a":        "Protokol_2a_Template.docx",
     "obrazec3":    "template_obrazec3.docx",
     "akt5":        "Akt_5_Template.docx",
     "akt6":        "Akt_6_Template.docx",
@@ -56,9 +57,10 @@ TEMPLATE_FILES = {
 }
 
 DOC_LABELS = {
-    "protokol2":   "Протокол_2",
-    "protokol2p2": "Протокол_2_Част_2",
-    "protokol2a":  "Протокол_2а",
+    "protokol2":         "Протокол_2",
+    "protokol2combined": "Protokol_2_Combined",
+    "protokol2p2":       "Протокол_2_Част_2",
+    "protokol2a":        "Протокол_2а",
     "obrazec3":    "Obrazec_3",
     "akt5":        "Akt_5",
     "akt6":        "Akt_6",
@@ -422,6 +424,16 @@ def build_placeholders(d):
         "{{Консултанти_Списък}}":        build_employees_list(employees),
         "{{Проектанти_Подписи}}":        build_projectants_signatures(projectants),
         "{{Консултанти_Подписи}}":       build_employees_signatures(employees),
+        "{{Opisanie_Ploshtadka}}":       d.get("Opisanie_Ploshtadka", ""),
+        "{{Sastoyanie_Okolo}}":          d.get("Sastoyanie_Okolo", "пътните и тротоарни настилки по прилежащата улица са в добро състояние, съседните имоти няма да бъдат засягани от бъдещото строителство"),
+        "{{Merki_PBZ}}":                 d.get("Merki_PBZ", "ще се осъществява от прилежащата улична мрежа съгласно съгласуван ПБЗ"),
+        "{{Darvesenost}}":               d.get("Darvesenost", ""),
+        "{{Kota_Izkop}}":               d.get("Kota_Izkop", ""),
+        "{{Kota_Cokul}}":               d.get("Kota_Cokul", ""),
+        "{{Kota_Korniz}}":              d.get("Kota_Korniz", ""),
+        "{{Kota_Bilo}}":                d.get("Kota_Bilo", ""),
+        "{{Reper_Nomer}}":              d.get("Reper_Nomer", ""),
+        "{{Reper_Kota}}":               d.get("Reper_Kota", ""),
     }
 
 
