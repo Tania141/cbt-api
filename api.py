@@ -1225,6 +1225,76 @@ def ai_extract_protokol2():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/ai/generate-akt15-sgrada", methods=["POST"])
+@require_auth
+def ai_generate_akt15_sgrada():
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
+
+    body = request.get_json()
+    if not body:
+        return jsonify({"error": "Липсва тяло на заявката"}), 400
+
+    pi                = str(body.get("pi", "unknown"))
+    passport          = body.get("passport", [])
+    vozlozhiteli_table = body.get("vozlozhiteli_table", "")
+    files             = body.get("files", [])
+    tenant_id         = request.current_user.get("tenant_id")
+    user_id           = request.current_user.get("sub")
+
+    prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "akt15_sgrada.txt")
+    with open(prompt_path, "r", encoding="utf-8") as fh:
+        system_prompt = fh.read()
+
+    d = rows_to_dict(passport)
+
+    content = []
+    for f in files:
+        if f.get("data"):
+            content.append({
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": f.get("media_type", "application/pdf"),
+                    "data": f["data"]
+                }
+            })
+
+    passport_text = "\n".join(f"{k}: {v}" for k, v in d.items() if v)
+    user_text = (
+        f"ПАСПОРТНИ ДАННИ:\n{passport_text}\n\n"
+        f"ТАБЛИЦА С ВЪЗЛОЖИТЕЛИ (апартаменти / собственици / НА / пълномощници):\n{vozlozhiteli_table}\n\n"
+        "Генерирай пълния текст на Акт 15 следвайки инструкциите от системния промпт."
+    )
+    content.append({"type": "text", "text": user_text})
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=8192,
+            system=system_prompt,
+            messages=[{"role": "user", "content": content}]
+        )
+
+        result_text = "".join(b.text for b in response.content if hasattr(b, "text"))
+
+        log_action("generate_akt15_sgrada", user_id=user_id, tenant_id=tenant_id,
+                   detail=f"PI={pi} tokens={response.usage.input_tokens}+{response.usage.output_tokens}")
+
+        return jsonify({
+            "status": "ok",
+            "text": result_text,
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+        })
+
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Claude API грешка: {str(e)}"}), 502
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── AI Валидация ──────────────────────────────────────────────────────────────
 VALIDATION_SYSTEM_PROMPT = """Ти си експерт по българското строително законодателство, специализиран в Наредба №3 от 2003 г. за съставяне на актове и протоколи по време на строителство.
 
