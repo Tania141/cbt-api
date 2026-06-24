@@ -1228,63 +1228,96 @@ def ai_extract_protokol2():
 @app.route("/api/ai/generate-akt15-sgrada", methods=["POST"])
 @require_auth
 def ai_generate_akt15_sgrada():
+    """
+    Генерира Акт 15 за сграда чрез Claude AI + шаблон .docx
+    Тяло (JSON):
+    {
+        "pi": "...",
+        "passport": [[ключ, стойност], ...],
+        "apartments": [{"apt": "...", "vozlagatel": "...", "na_doc": "...", "na_date": "..."}],
+        "files": [{"name": "...", "data": "<base64>", "media_type": "application/pdf"}]
+    }
+    """
     if not ANTHROPIC_API_KEY:
         return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
 
     body = request.get_json()
     if not body:
-        return jsonify({"error": "Липсва тяло на заявката"}), 400
+        return jsonify({"error": "Липсва тяло"}), 400
 
-    pi                = str(body.get("pi", "unknown"))
-    passport          = body.get("passport", [])
-    vozlozhiteli_table = body.get("vozlozhiteli_table", "")
-    files             = body.get("files", [])
-    tenant_id         = request.current_user.get("tenant_id")
-    user_id           = request.current_user.get("sub")
+    pi         = str(body.get("pi", "unknown"))
+    d          = rows_to_dict(body.get("passport", []))
+    apartments = body.get("apartments", [])
+    files      = body.get("files", [])
+    tenant_id  = request.current_user.get("tenant_id")
+    user_id    = request.current_user.get("sub")
 
-    prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "akt15_sgrada.txt")
-    with open(prompt_path, "r", encoding="utf-8") as fh:
-        system_prompt = fh.read()
+    apt_lines = "\n".join(
+        f"Апартамент {a.get('apt','—')}: {a.get('vozlagatel','—')}, НА №{a.get('na_doc','—')} от {a.get('na_date','—')}"
+        for a in apartments
+    ) if apartments else "—"
 
-    d = rows_to_dict(passport)
+    prompt = f"""Ти си опитен строителен надзорник. Съставяш Акт 15 за сграда по Наредба №3/2003 г.
 
-    content = []
-    for f in files:
-        if f.get("data"):
-            content.append({
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": f.get("media_type", "application/pdf"),
-                    "data": f["data"]
-                }
-            })
+ДАННИ ОТ ПАСПОРТА:
+Строеж: {d.get('Строеж', '—')}
+Адрес: {d.get('Адрес', '—')}
+Възложител: {build_vazlogitel_block(d)}
+РС Номер: {d.get('РС_Номер', '—')}, Дата: {d.get('РС_Дата', '—')}
+Консултант: {d.get('Консултант_Фирма', '—')}
+Строител: {d.get('Строител_Фирма', '—')}
 
-    passport_text = "\n".join(f"{k}: {v}" for k, v in d.items() if v)
-    user_text = (
-        f"ПАСПОРТНИ ДАННИ:\n{passport_text}\n\n"
-        f"ТАБЛИЦА С ВЪЗЛОЖИТЕЛИ (апартаменти / собственици / НА / пълномощници):\n{vozlozhiteli_table}\n\n"
-        "Генерирай пълния текст на Акт 15 следвайки инструкциите от системния промпт."
-    )
-    content.append({"type": "text", "text": user_text})
+АПАРТАМЕНТИ И НА ДОКУМЕНТИ:
+{apt_lines}
+
+Прегледай прикачените документи (ако има) и генерирай пълен текст на Акт 15 готов за Word.
+"""
 
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+        content = []
+        for f in files:
+            if f.get("media_type") == "application/pdf" and f.get("data"):
+                content.append({
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": "application/pdf", "data": f["data"]}
+                })
+        content.append({"type": "text", "text": prompt})
+
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=8192,
-            system=system_prompt,
+            max_tokens=4000,
             messages=[{"role": "user", "content": content}]
         )
 
-        result_text = "".join(b.text for b in response.content if hasattr(b, "text"))
+        result_text = "".join(
+            block.text for block in response.content if hasattr(block, "text")
+        )
+
+        # Генерираме .docx от шаблон
+        dbx = get_dropbox()
+        file_url = ""
+        if dbx:
+            try:
+                repl = build_placeholders(d)
+                doc_bytes = generate_from_template(TEMPLATE_FILES["akt15"], repl)
+                filename = f"PI-{pi}_Akt_15_Sgrada.docx"
+                folder   = f"{DROPBOX_FOLDER}/{tenant_id}/PI-{pi}"
+                path     = f"{folder}/{filename}"
+                dbx_create_folder(dbx, folder)
+                dbx_upload(dbx, path, doc_bytes)
+                file_url = get_shared_link(dbx, path)
+            except Exception as e:
+                file_url = ""  # AI резултатът се връща дори без .docx
 
         log_action("generate_akt15_sgrada", user_id=user_id, tenant_id=tenant_id,
                    detail=f"PI={pi} tokens={response.usage.input_tokens}+{response.usage.output_tokens}")
 
         return jsonify({
             "status": "ok",
-            "text": result_text,
+            "result": result_text,
+            "file_url": file_url,
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
         })
