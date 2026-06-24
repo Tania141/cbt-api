@@ -1295,21 +1295,16 @@ def ai_generate_akt15_sgrada():
             block.text for block in response.content if hasattr(block, "text")
         )
 
-        # Генерираме .docx от шаблон
-        dbx = get_dropbox()
-        file_url = ""
-        if dbx:
-            try:
-                repl = build_placeholders(d)
-                doc_bytes = generate_from_template(TEMPLATE_FILES["akt15"], repl)
-                filename = f"PI-{pi}_Akt_15_Sgrada.docx"
-                folder   = f"{DROPBOX_FOLDER}/{tenant_id}/PI-{pi}"
-                path     = f"{folder}/{filename}"
-                dbx_create_folder(dbx, folder)
-                dbx_upload(dbx, path, doc_bytes)
-                file_url = get_shared_link(dbx, path)
-            except Exception as e:
-                file_url = ""  # AI резултатът се връща дори без .docx
+        # Генерираме .docx локално и връщаме като base64
+        docx_b64 = ""
+        docx_error = ""
+        filename = f"PI-{pi}_Akt_15_Sgrada.docx"
+        try:
+            repl = build_placeholders(d)
+            doc_bytes = generate_from_template(TEMPLATE_FILES["akt15"], repl)
+            docx_b64 = base64.b64encode(doc_bytes).decode("utf-8")
+        except Exception as e:
+            docx_error = str(e)
 
         log_action("generate_akt15_sgrada", user_id=user_id, tenant_id=tenant_id,
                    detail=f"PI={pi} tokens={response.usage.input_tokens}+{response.usage.output_tokens}")
@@ -1317,7 +1312,9 @@ def ai_generate_akt15_sgrada():
         return jsonify({
             "status": "ok",
             "result": result_text,
-            "file_url": file_url,
+            "docx_b64": docx_b64,
+            "filename": filename,
+            "docx_error": docx_error,
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
         })
