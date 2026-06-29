@@ -1259,11 +1259,17 @@ def ai_generate_akt15_sgrada():
                     "type": "document",
                     "source": {"type": "base64", "media_type": "application/pdf", "data": f["data"]}
                 })
-            elif "word" in mt or mt == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                content.append({
-                    "type": "document",
-                    "source": {"type": "base64", "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "data": f["data"]}
-                })
+            elif "word" in mt or "openxmlformats" in mt:
+                try:
+                    raw = base64.b64decode(f["data"])
+                    doc_obj = Document(io.BytesIO(raw))
+                    docx_text = "\n".join(p.text for p in doc_obj.paragraphs if p.text.strip())
+                    content.append({
+                        "type": "text",
+                        "text": f"=== СЪДЪРЖАНИЕ НА ДОКУМЕНТ: {f.get('name', 'проект.docx')} ===\n{docx_text}\n=== КРАЙ НА ДОКУМЕНТА ==="
+                    })
+                except Exception as docx_err:
+                    print(f"[WARN] Неуспешно четене на .docx: {docx_err}", flush=True)
         content.append({"type": "text", "text": prompt})
 
         response = client.messages.create(
