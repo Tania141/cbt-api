@@ -1237,6 +1237,9 @@ def ai_generate_akt15_sgrada():
         return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
 
     body = request.get_json()
+    print(f"[DEBUG] Body keys: {list(body.keys()) if body else 'EMPTY'}", flush=True)
+    print(f"[DEBUG] Prompt present: {'prompt' in body if body else False}", flush=True)
+    print(f"[DEBUG] Prompt length: {len(body.get('prompt', '')) if body else 0}", flush=True)
     if not body or "prompt" not in body:
         return jsonify({"error": "Липсва поле 'prompt'"}), 400
 
