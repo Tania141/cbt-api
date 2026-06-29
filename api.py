@@ -1229,65 +1229,46 @@ def ai_extract_protokol2():
 @require_auth
 def ai_generate_akt15_sgrada():
     """
-    Генерира Акт 15 за сграда чрез Claude AI + шаблон .docx
-    Тяло (JSON):
-    {
-        "pi": "...",
-        "passport": [[ключ, стойност], ...],
-        "apartments": [{"apt": "...", "vozlagatel": "...", "na_doc": "...", "na_date": "..."}],
-        "files": [{"name": "...", "data": "<base64>", "media_type": "application/pdf"}]
-    }
+    Акт 15 за сграда — приема prompt + файлове (PDF и docx) като base64,
+    извиква Claude API и връща генерирания текст.
+    Тяло (JSON): { "pi": "...", "prompt": "...", "files": [{name, data, media_type}] }
     """
     if not ANTHROPIC_API_KEY:
         return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
 
     body = request.get_json()
-    if not body:
-        return jsonify({"error": "Липсва тяло"}), 400
+    if not body or "prompt" not in body:
+        return jsonify({"error": "Липсва поле 'prompt'"}), 400
 
-    pi         = str(body.get("pi", "unknown"))
-    d          = rows_to_dict(body.get("passport", []))
-    apartments = body.get("apartments", [])
-    files      = body.get("files", [])
-    tenant_id  = request.current_user.get("tenant_id")
-    user_id    = request.current_user.get("sub")
-
-    apt_lines = "\n".join(
-        f"Апартамент {a.get('apt','—')}: {a.get('vozlagatel','—')}, НА №{a.get('na_doc','—')} от {a.get('na_date','—')}"
-        for a in apartments
-    ) if apartments else "—"
-
-    prompt = f"""Ти си опитен строителен надзорник. Съставяш Акт 15 за сграда по Наредба №3/2003 г.
-
-ДАННИ ОТ ПАСПОРТА:
-Строеж: {d.get('Строеж', '—')}
-Адрес: {d.get('Адрес', '—')}
-Възложител: {build_vazlogitel_block(d)}
-РС Номер: {d.get('РС_Номер', '—')}, Дата: {d.get('РС_Дата', '—')}
-Консултант: {d.get('Консултант_Фирма', '—')}
-Строител: {d.get('Строител_Фирма', '—')}
-
-АПАРТАМЕНТИ И НА ДОКУМЕНТИ:
-{apt_lines}
-
-Прегледай прикачените документи (ако има) и генерирай пълен текст на Акт 15 готов за Word.
-"""
+    pi        = str(body.get("pi", "unknown"))
+    prompt    = body["prompt"]
+    files     = body.get("files", [])
+    tenant_id = request.current_user.get("tenant_id")
+    user_id   = request.current_user.get("sub")
 
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
         content = []
         for f in files:
-            if f.get("media_type") == "application/pdf" and f.get("data"):
+            mt = f.get("media_type", "")
+            if not f.get("data"):
+                continue
+            if mt == "application/pdf":
                 content.append({
                     "type": "document",
                     "source": {"type": "base64", "media_type": "application/pdf", "data": f["data"]}
+                })
+            elif "word" in mt or mt == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                content.append({
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "data": f["data"]}
                 })
         content.append({"type": "text", "text": prompt})
 
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4000,
+            max_tokens=8000,
             messages=[{"role": "user", "content": content}]
         )
 
@@ -1295,27 +1276,13 @@ def ai_generate_akt15_sgrada():
             block.text for block in response.content if hasattr(block, "text")
         )
 
-        # Генерираме .docx локално и връщаме като base64
-        docx_b64 = ""
-        docx_error = ""
-        filename = f"PI-{pi}_Akt_15_Sgrada.docx"
-        try:
-            repl = build_placeholders(d)
-            doc_bytes = generate_from_template(TEMPLATE_FILES["akt15"], repl)
-            docx_b64 = base64.b64encode(doc_bytes).decode("utf-8")
-        except Exception as e:
-            docx_error = str(e)
-
         log_action("generate_akt15_sgrada", user_id=user_id, tenant_id=tenant_id,
                    detail=f"PI={pi} tokens={response.usage.input_tokens}+{response.usage.output_tokens}")
 
         return jsonify({
             "status": "ok",
             "result": result_text,
-            "docx_b64": docx_b64,
-            "filename": filename,
-            "docx_error": docx_error,
-            "input_tokens": response.usage.input_tokens,
+            "input_tokens":  response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
         })
 
