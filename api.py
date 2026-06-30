@@ -18,6 +18,7 @@ from psycopg2.extras import RealDictCursor
 import bcrypt
 import jwt
 from functools import wraps
+from validation_akt15 import validate_akt15
 
 app = Flask(__name__)
 CORS(app, origins="*")
@@ -1285,12 +1286,18 @@ def ai_generate_akt15_sgrada():
             block.text for block in response.content if hasattr(block, "text")
         )
 
+        manual = body.get("manual", {})
+        apartments = body.get("apartments", [])
+        validation_result = validate_akt15(manual, apartments=apartments)
+        print(f"[DEBUG] Validation result: {validation_result}", flush=True)
+
         log_action("generate_akt15_sgrada", user_id=user_id, tenant_id=tenant_id,
                    detail=f"PI={pi} tokens={response.usage.input_tokens}+{response.usage.output_tokens}")
 
         return jsonify({
             "status": "ok",
             "result": result_text,
+            "validation": validation_result,
             "input_tokens":  response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
         })
