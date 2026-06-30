@@ -1234,11 +1234,27 @@ def ai_generate_akt15_sgrada():
     извиква Claude API и връща генерирания текст.
     Тяло (JSON): { "pi": "...", "prompt": "...", "files": [{name, data, media_type}] }
     """
+    body = request.get_json()
+    print(f"[DEBUG] Body keys: {list(body.keys()) if body else 'EMPTY'}", flush=True)
+
+    manual = body.get("manual", {}) if body else {}
+    apartments = body.get("apartments", []) if body else []
+
+    # ── ТЕСТОВ РЕЖИМ — без извикване на Claude API ──
+    if body and body.get("test_mode"):
+        validation_result = validate_akt15(manual, apartments=apartments)
+        return jsonify({
+            "status": "ok",
+            "result": "[ТЕСТОВ РЕЖИМ] Фиктивен текст на Акт 15 — реалното AI извикване е пропуснато.",
+            "validation": validation_result,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        })
+    # ── край на тестовия режим ──
+
     if not ANTHROPIC_API_KEY:
         return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
 
-    body = request.get_json()
-    print(f"[DEBUG] Body keys: {list(body.keys()) if body else 'EMPTY'}", flush=True)
     print(f"[DEBUG] Prompt present: {'prompt' in body if body else False}", flush=True)
     print(f"[DEBUG] Prompt length: {len(body.get('prompt', '')) if body else 0}", flush=True)
     if not body or "prompt" not in body:
@@ -1278,7 +1294,7 @@ def ai_generate_akt15_sgrada():
 
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=8000,
+            max_tokens=2000,
             messages=[{"role": "user", "content": content}]
         )
 
@@ -1286,8 +1302,6 @@ def ai_generate_akt15_sgrada():
             block.text for block in response.content if hasattr(block, "text")
         )
 
-        manual = body.get("manual", {})
-        apartments = body.get("apartments", [])
         validation_result = validate_akt15(manual, apartments=apartments)
         print(f"[DEBUG] Validation result: {validation_result}", flush=True)
 
