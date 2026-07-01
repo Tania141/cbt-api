@@ -1277,6 +1277,17 @@ def ai_generate_akt15_sgrada():
     # ── ТЕСТОВ РЕЖИМ — без извикване на Claude API ──
     if body and body.get("test_mode"):
         validation_result = validate_akt15(manual, apartments=apartments)
+        log_action(
+            "generate_akt15_test",
+            user_id=request.current_user.get("sub") if hasattr(request, "current_user") else None,
+            tenant_id=request.current_user.get("tenant_id") if hasattr(request, "current_user") else None,
+            doc_type="akt15",
+            status=validation_result.get("status"),
+            tokens_in=0,
+            tokens_out=0,
+            validation=validation_result,
+            detail={"pi": body.get("pi", "unknown"), "test_mode": True},
+        )
         return jsonify({
             "status": "ok",
             "result": "[ТЕСТОВ РЕЖИМ] Фиктивен текст на Акт 15 — реалното AI извикване е пропуснато.",
