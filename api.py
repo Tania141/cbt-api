@@ -156,6 +156,11 @@ def init_db():
                 ("ip_address", "TEXT"),
                 ("user_agent", "TEXT"),
                 ("detail",     "JSONB"),
+                ("doc_type",   "VARCHAR(50)"),
+                ("status",     "VARCHAR(20)"),
+                ("tokens_in",  "INTEGER"),
+                ("tokens_out", "INTEGER"),
+                ("validation", "JSONB"),
             ]:
                 cur.execute(f"ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS {col} {typedef}")
             cur.execute("""
@@ -173,7 +178,8 @@ def init_db():
     conn.close()
     print("PostgreSQL: таблиците са готови")
 
-def log_action(action, user_id=None, tenant_id=None, detail=None):
+def log_action(action, user_id=None, tenant_id=None, detail=None,
+               doc_type=None, status=None, tokens_in=None, tokens_out=None, validation=None):
     conn = get_db()
     if not conn:
         return
@@ -182,8 +188,9 @@ def log_action(action, user_id=None, tenant_id=None, detail=None):
             with conn.cursor() as cur:
                 cur.execute(
                     """INSERT INTO audit_log
-                       (action, user_id, tenant_id, endpoint, method, ip_address, user_agent, detail)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                       (action, user_id, tenant_id, endpoint, method, ip_address, user_agent, detail,
+                        doc_type, status, tokens_in, tokens_out, validation)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
                         action,
                         str(user_id) if user_id else None,
@@ -193,6 +200,11 @@ def log_action(action, user_id=None, tenant_id=None, detail=None):
                         request.headers.get("X-Forwarded-For", request.remote_addr),
                         request.headers.get("User-Agent", ""),
                         json.dumps(detail, ensure_ascii=False) if detail else None,
+                        doc_type,
+                        status,
+                        tokens_in,
+                        tokens_out,
+                        json.dumps(validation, ensure_ascii=False) if validation else None,
                     )
                 )
     except Exception:
@@ -1305,8 +1317,17 @@ def ai_generate_akt15_sgrada():
         validation_result = validate_akt15(manual, apartments=apartments)
         print(f"[DEBUG] Validation result: {validation_result}", flush=True)
 
-        log_action("generate_akt15_sgrada", user_id=user_id, tenant_id=tenant_id,
-                   detail=f"PI={pi} tokens={response.usage.input_tokens}+{response.usage.output_tokens}")
+        log_action(
+            "generate_akt15_sgrada",
+            user_id=user_id, tenant_id=tenant_id,
+            doc_type="akt15",
+            status=validation_result.get("status"),
+            tokens_in=response.usage.input_tokens,
+            tokens_out=response.usage.output_tokens,
+            validation=validation_result,
+            detail={"pi": pi, "errors": len(validation_result.get("errors", [])),
+                    "warnings": len(validation_result.get("warnings", []))},
+        )
 
         return jsonify({
             "status": "ok",
