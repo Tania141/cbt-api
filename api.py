@@ -1,7 +1,7 @@
 """
 АКТ СИСТЕМ REST API v2.1 - Template-based document generation + Claude AI
 """
-import os, io, re, json, base64
+import os, io, re, json, base64, secrets
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
@@ -173,6 +173,21 @@ def init_db():
                     tenant_id     TEXT,
                     created_at    TIMESTAMPTZ DEFAULT NOW(),
                     is_active     BOOLEAN NOT NULL DEFAULT TRUE
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS invites (
+                    id         SERIAL PRIMARY KEY,
+                    code       TEXT NOT NULL UNIQUE,
+                    tenant_id  TEXT NOT NULL,
+                    role       TEXT NOT NULL DEFAULT 'operator'
+                               CHECK (role IN ('admin', 'operator', 'viewer')),
+                    created_by TEXT,
+                    used_by    TEXT,
+                    used_at    TIMESTAMPTZ,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    is_used    BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
     conn.close()
@@ -629,32 +644,43 @@ def auth_register():
     body = request.get_json()
     if not body or not body.get("email") or not body.get("password"):
         return jsonify({"error": "Необходими са email и password"}), 400
-    if not body.get("tenant_id"):
-        return jsonify({"error": "Необходим е tenant_id"}), 400
-
-    role      = body.get("role", "viewer")
-    tenant_id = str(body["tenant_id"])
-    if role not in ("admin", "operator", "viewer"):
-        return jsonify({"error": "Невалидна роля. Позволени: admin, operator, viewer"}), 400
-
-    pw_hash = bcrypt.hashpw(body["password"].encode(), bcrypt.gensalt()).decode()
+    if not body.get("invite_code"):
+        return jsonify({"error": "Необходим е invite_code (код от покана)"}), 400
 
     conn = get_db()
     if not conn:
         return jsonify({"error": "База данни не е свързана"}), 503
     try:
+        # Проверяваме поканата — валидна, неизтекла, неизползвана
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM tenants WHERE id = %s AND is_active = TRUE", (tenant_id,))
-            if not cur.fetchone():
-                return jsonify({"error": "Невалиден или неактивен tenant_id"}), 400
+            cur.execute(
+                """SELECT id, tenant_id, role FROM invites
+                   WHERE code = %s AND is_used = FALSE AND expires_at > NOW()""",
+                (body["invite_code"].strip(),)
+            )
+            invite = cur.fetchone()
+        if not invite:
+            return jsonify({"error": "Невалиден, изтекъл или вече използван код за покана"}), 400
+
+        tenant_id = invite["tenant_id"]
+        role      = invite["role"]
+        pw_hash   = bcrypt.hashpw(body["password"].encode(), bcrypt.gensalt()).decode()
+        email     = body["email"].lower().strip()
+
         with conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """INSERT INTO users (email, password_hash, role, tenant_id)
                        VALUES (%s, %s, %s, %s) RETURNING id, email, role, tenant_id, created_at""",
-                    (body["email"].lower().strip(), pw_hash, role, tenant_id)
+                    (email, pw_hash, role, tenant_id)
                 )
                 user = dict(cur.fetchone())
+                # Маркираме поканата като използвана
+                cur.execute(
+                    "UPDATE invites SET is_used = TRUE, used_by = %s, used_at = NOW() WHERE id = %s",
+                    (str(user["id"]), invite["id"])
+                )
+        log_action("register", detail={"email": email, "role": role, "tenant_id": tenant_id})
         return jsonify({"status": "ok", "user": user}), 201
     except psycopg2.errors.UniqueViolation:
         return jsonify({"error": "Email вече е регистриран"}), 409
@@ -840,6 +866,46 @@ def get_audit_log():
             )
             entries = [dict(r) for r in cur.fetchall()]
         return jsonify({"entries": entries, "count": len(entries)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/invite", methods=["POST"])
+@require_admin
+def create_invite():
+    """Генерира еднократна покана за регистрация с конкретна роля."""
+    body = request.get_json()
+    if not body or not body.get("tenant_id"):
+        return jsonify({"error": "Необходим е tenant_id"}), 400
+    role = body.get("role", "operator")
+    if role not in ("admin", "operator", "viewer"):
+        return jsonify({"error": "Невалидна роля. Позволени: admin, operator, viewer"}), 400
+    tenant_id = str(body["tenant_id"])
+    expires_hours = int(body.get("expires_hours", 48))
+
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM tenants WHERE id = %s AND is_active = TRUE", (tenant_id,))
+            if not cur.fetchone():
+                return jsonify({"error": "Невалиден или неактивен tenant_id"}), 400
+        code = secrets.token_urlsafe(32)
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO invites (code, tenant_id, role, created_by, expires_at)
+                       VALUES (%s, %s, %s, %s, NOW() + INTERVAL '%s hours')
+                       RETURNING id, code, tenant_id, role, expires_at""",
+                    (code, tenant_id, role, request.current_user.get("sub"), expires_hours)
+                )
+                invite = dict(cur.fetchone())
+        log_action("create_invite", user_id=request.current_user.get("sub"),
+                   tenant_id=tenant_id, detail={"role": role, "invite_id": invite["id"]})
+        return jsonify({"status": "ok", "invite": invite}), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
