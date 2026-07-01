@@ -846,6 +846,28 @@ def get_audit_log():
         conn.close()
 
 
+@app.route("/api/audit", methods=["GET"])
+def get_audit_quick():
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "PostgreSQL не е конфигуриран"}), 503
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, created_at, action, doc_type, status,
+                       tokens_in, tokens_out, tenant_id, detail
+                FROM audit_log
+                ORDER BY created_at DESC
+                LIMIT 20
+            """)
+            rows = [dict(r) for r in cur.fetchall()]
+        return jsonify({"audit": rows, "count": len(rows)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
 @app.route("/api/passports", methods=["GET"])
 @require_auth
 def list_passports():
