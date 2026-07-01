@@ -1074,6 +1074,7 @@ def cloud_load():
 
 # ── AI Протоколи ──────────────────────────────────────────────────────────────
 @app.route("/api/ai/generate", methods=["POST"])
+@require_auth
 def ai_generate():
     """
     Приема prompt + (опционално) PDF файлове като base64,
@@ -1150,6 +1151,7 @@ def ai_generate():
 
 
 @app.route("/api/ai/chat", methods=["POST"])
+@require_auth
 def ai_chat():
     if not ANTHROPIC_API_KEY:
         return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
