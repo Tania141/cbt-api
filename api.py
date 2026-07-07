@@ -798,7 +798,7 @@ def auth_login():
             record_login_attempt(ip_address, email, success=False)
             return jsonify({"error": "Невалиден email или парола"}), 401
         if not user["is_active"]:
-            return jsonify({"error": "Акаунтът е деактивиран"}), 403
+            return jsonify({"error": "Този акаунт е деактивиран. Свържете се с администратор."}), 403
         record_login_attempt(ip_address, email, success=True)
         token = make_token(user)
         log_action("login", user_id=user["id"], tenant_id=user["tenant_id"],
@@ -956,6 +956,73 @@ def get_audit_log():
             )
             entries = [dict(r) for r in cur.fetchall()]
         return jsonify({"entries": entries, "count": len(entries)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/users/<int:user_id>/deactivate", methods=["POST"])
+@require_admin
+def deactivate_user(user_id):
+    admin_id = int(request.current_user["sub"])
+    if user_id == admin_id:
+        return jsonify({"error": "Не можете да деактивирате собствения си акаунт."}), 400
+
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, email, role, is_active FROM users WHERE id = %s", (user_id,))
+            target = cur.fetchone()
+        if not target:
+            return jsonify({"error": f"Потребител с id={user_id} не съществува."}), 404
+        if not target["is_active"]:
+            return jsonify({"error": "Потребителят вече е деактивиран."}), 409
+
+        # Предпазна мярка: не позволявай деактивиране на последния активен admin
+        if target["role"] == "admin":
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = TRUE")
+                if cur.fetchone()["n"] <= 1:
+                    return jsonify({"error": "Не може да се деактивира последният активен администратор."}), 400
+
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET is_active = FALSE WHERE id = %s", (user_id,))
+        log_action("deactivate_user", user_id=admin_id,
+                   tenant_id=request.current_user.get("tenant_id"),
+                   detail={"target_user_id": user_id, "target_email": target["email"]})
+        return jsonify({"status": "ok", "message": f"Потребител {target['email']} е деактивиран."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/users/<int:user_id>/activate", methods=["POST"])
+@require_admin
+def activate_user(user_id):
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, email, is_active FROM users WHERE id = %s", (user_id,))
+            target = cur.fetchone()
+        if not target:
+            return jsonify({"error": f"Потребител с id={user_id} не съществува."}), 404
+        if target["is_active"]:
+            return jsonify({"error": "Потребителят вече е активен."}), 409
+
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET is_active = TRUE WHERE id = %s", (user_id,))
+        log_action("activate_user", user_id=request.current_user["sub"],
+                   tenant_id=request.current_user.get("tenant_id"),
+                   detail={"target_user_id": user_id, "target_email": target["email"]})
+        return jsonify({"status": "ok", "message": f"Потребител {target['email']} е активиран."})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
