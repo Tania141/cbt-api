@@ -5,8 +5,6 @@ import os, io, re, json, base64, secrets
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side
@@ -24,14 +22,6 @@ from validation_akt15 import validate_akt15
 
 app = Flask(__name__)
 CORS(app, origins="*")
-
-# ── Rate limiting (in-memory, single-instance Railway dyno) ──────────────────
-limiter = Limiter(
-    key_func=get_remote_address,
-    app=app,
-    default_limits=[],          # без глобален лимит — само explicit декоратори
-    storage_uri="memory://",
-)
 
 DATABASE_URL          = os.environ.get("DATABASE_URL", "")
 JWT_SECRET            = os.environ.get("JWT_SECRET", "change-me-in-production")
@@ -200,6 +190,23 @@ def init_db():
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS login_attempts (
+                    id         SERIAL PRIMARY KEY,
+                    ip_address TEXT NOT NULL,
+                    email      TEXT NOT NULL,
+                    success    BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_login_attempts_ip
+                ON login_attempts (ip_address, created_at)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_login_attempts_email
+                ON login_attempts (email, created_at)
+            """)
     conn.close()
     print("PostgreSQL: таблиците са готови")
 
@@ -236,6 +243,66 @@ def log_action(action, user_id=None, tenant_id=None, detail=None,
         pass  # audit failures must never break the main request
     finally:
         conn.close()
+
+# ── Login rate limiting (PostgreSQL-backed, works across gunicorn workers) ───
+# Прагове: 5 неуспешни опита/IP/минута → 429; 10 неуспешни/email/5 мин → 429
+LOGIN_LIMIT_IP_COUNT    = 5
+LOGIN_LIMIT_IP_WINDOW   = "1 minute"
+LOGIN_LIMIT_EMAIL_COUNT = 10
+LOGIN_LIMIT_EMAIL_WINDOW = "5 minutes"
+
+def check_login_rate_limit(ip_address, email):
+    """Връща 'ip', 'email' ако е надминат лимитът, или None ако е OK."""
+    conn = get_db()
+    if not conn:
+        return None  # при недостъпна DB — пропускаме проверката (fail open)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT COUNT(*) AS n FROM login_attempts "
+                f"WHERE ip_address = %s AND success = FALSE "
+                f"AND created_at > NOW() - INTERVAL '{LOGIN_LIMIT_IP_WINDOW}'",
+                (ip_address,)
+            )
+            if cur.fetchone()["n"] >= LOGIN_LIMIT_IP_COUNT:
+                return "ip"
+            cur.execute(
+                f"SELECT COUNT(*) AS n FROM login_attempts "
+                f"WHERE email = %s AND success = FALSE "
+                f"AND created_at > NOW() - INTERVAL '{LOGIN_LIMIT_EMAIL_WINDOW}'",
+                (email,)
+            )
+            if cur.fetchone()["n"] >= LOGIN_LIMIT_EMAIL_COUNT:
+                return "email"
+        return None
+    except Exception:
+        return None  # при грешка не блокираме легитимен вход
+    finally:
+        conn.close()
+
+def record_login_attempt(ip_address, email, success):
+    """Записва опит за вход. При успех — изчиства старите неуспешни записи."""
+    conn = get_db()
+    if not conn:
+        return
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO login_attempts (ip_address, email, success) VALUES (%s, %s, %s)",
+                    (ip_address, email, success)
+                )
+                if success:
+                    # Нулираме историята след успешен вход
+                    cur.execute(
+                        "DELETE FROM login_attempts WHERE ip_address = %s OR email = %s",
+                        (ip_address, email)
+                    )
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
 
 # ── Dropbox helpers ───────────────────────────────────────────────────────────
 def get_dropbox():
@@ -701,21 +768,21 @@ def auth_register():
 
 
 @app.route("/api/auth/login", methods=["POST"])
-@limiter.limit(
-    "5 per minute",
-    error_message="Твърде много неуспешни опити за вход. Опитайте отново след 1 минута.",
-)
 def auth_login():
     body = request.get_json()
     if not body or not body.get("email") or not body.get("password"):
         return jsonify({"error": "Необходими са email и password"}), 400
 
-    email = body["email"].lower().strip()
+    email      = body["email"].lower().strip()
+    ip_address = request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
 
-    # ── Допълнителен лимит по email (срещу distributed brute-force към 1 акаунт) ──
-    email_key = f"login_email:{email}"
-    email_hits = limiter.storage.get(email_key) or 0
-    if int(email_hits) >= 10:
+    # ── Rate limit проверка (PostgreSQL-backed, работи и при multiple workers) ──
+    limit_hit = check_login_rate_limit(ip_address, email)
+    if limit_hit == "ip":
+        return jsonify({
+            "error": "Твърде много неуспешни опити за вход от този адрес. Опитайте отново след 1 минута."
+        }), 429
+    if limit_hit == "email":
         return jsonify({
             "error": "Акаунтът е временно заключен поради много неуспешни опити. Опитайте след 5 минути."
         }), 429
@@ -728,13 +795,11 @@ def auth_login():
             cur.execute("SELECT * FROM users WHERE email = %s", (email,))
             user = cur.fetchone()
         if not user or not bcrypt.checkpw(body["password"].encode(), user["password_hash"].encode()):
-            # Увеличаваме counter-а по email при неуспех (TTL 5 минути)
-            limiter.storage.incr(email_key, 300)
+            record_login_attempt(ip_address, email, success=False)
             return jsonify({"error": "Невалиден email или парола"}), 401
         if not user["is_active"]:
             return jsonify({"error": "Акаунтът е деактивиран"}), 403
-        # Успешен вход — нулираме email counter-а
-        limiter.storage.clear(email_key)
+        record_login_attempt(ip_address, email, success=True)
         token = make_token(user)
         log_action("login", user_id=user["id"], tenant_id=user["tenant_id"],
                    detail={"email": user["email"], "role": user["role"]})
