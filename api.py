@@ -5,6 +5,8 @@ import os, io, re, json, base64, secrets
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side
@@ -22,6 +24,14 @@ from validation_akt15 import validate_akt15
 
 app = Flask(__name__)
 CORS(app, origins="*")
+
+# ── Rate limiting (in-memory, single-instance Railway dyno) ──────────────────
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=[],          # без глобален лимит — само explicit декоратори
+    storage_uri="memory://",
+)
 
 DATABASE_URL          = os.environ.get("DATABASE_URL", "")
 JWT_SECRET            = os.environ.get("JWT_SECRET", "change-me-in-production")
@@ -691,25 +701,40 @@ def auth_register():
 
 
 @app.route("/api/auth/login", methods=["POST"])
+@limiter.limit(
+    "5 per minute",
+    error_message="Твърде много неуспешни опити за вход. Опитайте отново след 1 минута.",
+)
 def auth_login():
     body = request.get_json()
     if not body or not body.get("email") or not body.get("password"):
         return jsonify({"error": "Необходими са email и password"}), 400
+
+    email = body["email"].lower().strip()
+
+    # ── Допълнителен лимит по email (срещу distributed brute-force към 1 акаунт) ──
+    email_key = f"login_email:{email}"
+    email_hits = limiter.storage.get(email_key) or 0
+    if int(email_hits) >= 10:
+        return jsonify({
+            "error": "Акаунтът е временно заключен поради много неуспешни опити. Опитайте след 5 минути."
+        }), 429
 
     conn = get_db()
     if not conn:
         return jsonify({"error": "База данни не е свързана"}), 503
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT * FROM users WHERE email = %s",
-                (body["email"].lower().strip(),)
-            )
+            cur.execute("SELECT * FROM users WHERE email = %s", (email,))
             user = cur.fetchone()
         if not user or not bcrypt.checkpw(body["password"].encode(), user["password_hash"].encode()):
+            # Увеличаваме counter-а по email при неуспех (TTL 5 минути)
+            limiter.storage.incr(email_key, 300)
             return jsonify({"error": "Невалиден email или парола"}), 401
         if not user["is_active"]:
             return jsonify({"error": "Акаунтът е деактивиран"}), 403
+        # Успешен вход — нулираме email counter-а
+        limiter.storage.clear(email_key)
         token = make_token(user)
         log_action("login", user_id=user["id"], tenant_id=user["tenant_id"],
                    detail={"email": user["email"], "role": user["role"]})
