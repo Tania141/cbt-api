@@ -154,7 +154,6 @@ def build_placeholders(d):
         "{{Геодезист_2имена}}":          two_names(geo),
         "{{Геодезист_1и3}}":            one_and_three(geo),
         "{{consultant_specialists}}":    specs,
-        "{{constructor_name}}":          pj_k,
         "{{sn_konstruktivna}}":          sn_k,
         "{{СН_Конструктивна}}":          sn_k,
         "{{СН_Архитектура}}":            (by_spec(employees, "Архитектура") or [{}])[0].get("name", ""),
@@ -164,7 +163,6 @@ def build_placeholders(d):
         "{{СН_ПБ}}":                     (by_spec(employees, "ПБ") or [{}])[0].get("name", ""),
         "{{СН_Пътна}}":                  (by_spec(employees, "Пътна") or [{}])[0].get("name", ""),
         "{{СН_ОВК}}":                    (by_spec(employees, "ОВК и ЕЕ") or [{}])[0].get("name", ""),
-        "{{pj_konstruktivna}}":          pj_k,
         "{{Конструктивна}}":             pj_k,
         "{{ПЖ_Конструктивна}}":          pj_k,
         "{{ПЖ_Архитектура}}":            pj_arch,
@@ -185,6 +183,15 @@ def build_placeholders(d):
         "{{Kota_Bilo}}":                d.get("Kota_Bilo", ""),
         "{{Reper_Nomer}}":              d.get("Reper_Nomer", ""),
         "{{Reper_Kota}}":               d.get("Reper_Kota", ""),
+        # Кирилични алиаси — същите стойности, различен правопис в Протокол 2
+        "{{Кота_Изкоп}}":              d.get("Kota_Izkop", ""),
+        "{{Кота_Цокъл}}":              d.get("Kota_Cokul", ""),
+        "{{Кота_Корниз}}":             d.get("Kota_Korniz", ""),
+        "{{Кота_Bilo}}":               d.get("Kota_Bilo", ""),
+        "{{Репер_Номер}}":             d.get("Reper_Nomer", ""),
+        "{{Репер_Кота}}":              d.get("Reper_Kota", ""),
+        # Описание на строителната площадка — ръчно поле
+        "{{Описание_Сграда}}":         d.get("Opisanie_Sgrada", ""),
     }
 
 
