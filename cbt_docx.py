@@ -163,9 +163,14 @@ def build_placeholders(d):
         "{{СН_ПБ}}":                     (by_spec(employees, "ПБ") or [{}])[0].get("name", ""),
         "{{СН_Пътна}}":                  (by_spec(employees, "Пътна") or [{}])[0].get("name", ""),
         "{{СН_ОВК}}":                    (by_spec(employees, "ОВК и ЕЕ") or [{}])[0].get("name", ""),
-        "{{Конструктивна}}":             pj_k,
-        "{{ПЖ_Конструктивна}}":          pj_k,
-        "{{ПЖ_Архитектура}}":            pj_arch,
+        "{{Конструктивна}}":              pj_k,
+        "{{Конструктивна_1и3}}":          one_and_three(pj_k),
+        "{{ПЖ_Конструктивна}}":           pj_k,
+        "{{ПЖ_Конструктивна_1и3}}":       one_and_three(pj_k),
+        "{{ПЖ_Конструктивна _1и3}}":      one_and_three(pj_k),   # alias: space typo in template
+        "{{ПЖ_Архитектура}}":             pj_arch,
+        "{{ПЖ_Архитектура_1и3}}":         one_and_three(pj_arch),
+        "{{ПЖ_Архитектура _1и3}}":        one_and_three(pj_arch), # alias: space typo in template
         "{{Вода}}":                      d.get("Вода", ""),
         "{{Канализация}}":               d.get("Канализация", ""),
         "{{Ел_Захранване}}":             d.get("Ел_Захранване", ""),
