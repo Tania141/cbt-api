@@ -97,6 +97,18 @@ def build_employees_signatures(employees):
         for e in employees
     )
 
+def _normalize_cokul(raw: str) -> str:
+    """Strip accidental '+/-0,00=' prefix; return the tail VERBATIM (comma, spaces, ' м' intact)."""
+    s = raw.strip()
+    if "=" not in s:
+        return s
+    head, tail = s.split("=", 1)
+    _pfx = head.replace(" ", "").replace("+/-", "±").replace(",", ".")
+    if _pfx in ("±0.00", "±0", "0.00", "±0.0"):
+        return tail.strip()
+    return s
+
+
 def build_placeholders(d):
     employees   = extract_employees(d)
     projectants = extract_projectants(d)
@@ -183,14 +195,14 @@ def build_placeholders(d):
         "{{Merki_PBZ}}":                 d.get("Merki_PBZ", "ще се осъществява от прилежащата улична мрежа съгласно съгласуван ПБЗ"),
         "{{Darvesenost}}":               d.get("Darvesenost", ""),
         "{{Kota_Izkop}}":               d.get("Kota_Izkop", ""),
-        "{{Kota_Cokul}}":               d.get("Kota_Cokul", ""),
+        "{{Kota_Cokul}}":               _normalize_cokul(d.get("Kota_Cokul", "")),
         "{{Kota_Korniz}}":              d.get("Kota_Korniz", ""),
         "{{Kota_Bilo}}":                d.get("Kota_Bilo", ""),
         "{{Reper_Nomer}}":              d.get("Reper_Nomer", ""),
         "{{Reper_Kota}}":               d.get("Reper_Kota", ""),
         # Кирилични алиаси — същите стойности, различен правопис в Протокол 2
         "{{Кота_Изкоп}}":              d.get("Kota_Izkop", ""),
-        "{{Кота_Цокъл}}":              d.get("Kota_Cokul", ""),
+        "{{Кота_Цокъл}}":              _normalize_cokul(d.get("Kota_Cokul", "")),
         "{{Кота_Корниз}}":             d.get("Kota_Korniz", ""),
         "{{Кота_Bilo}}":               d.get("Kota_Bilo", ""),
         "{{Репер_Номер}}":             d.get("Reper_Nomer", ""),
