@@ -1,4 +1,4 @@
-"""
+﻿"""
 cbt_docx.py — Document-building helpers for АКТ СИСТЕМ.
 Extracted from api.py (refactor only, no behavior change).
 """
@@ -54,7 +54,41 @@ def by_spec(items, spec):
 
 # ── Structural block builders ─────────────────────────────────────────────────
 
+def extract_vazlogiteli(d):
+    """Extract list of clients — same pattern as extract_employees/extract_projectants."""
+    n = int(d.get("Възложители_Брой", 0) or 0)
+    return [{
+        "tip":      d.get(f"Възложител_{i}_Тип", "ФЛ"),
+        "firma":    d.get(f"Възложител_{i}_Фирма", ""),
+        "eik":      d.get(f"Възложител_{i}_ЕИК", ""),
+        "adres":    d.get(f"Възложител_{i}_Адрес", ""),
+        "pred":     d.get(f"Възложител_{i}_Представител", ""),
+        "podpisva": d.get(f"Възложител_{i}_Подписва", ""),
+    } for i in range(1, n+1) if d.get(f"Възложител_{i}_Фирма", "")]
+
+
+def _single_vazlogitel_line(v):
+    """Format one client entry for the header block."""
+    if v["tip"] in ("Физическо лице", "ФЛ"):
+        return v["firma"]
+    parts = [v["firma"]]
+    if v["eik"]:   parts.append(f"ЕИК {v['eik']}")
+    if v["adres"]: parts.append(v["adres"])
+    if v["pred"]:  parts.append(f"представлявано от {v['pred']}")
+    return ", ".join(parts)
+
+
 def build_vazlogitel_block(d):
+    """
+    ГОРЕ блок ({{Възложител_Блок}}): номериран списък 1..N.
+    Ако Възложители_Брой липсва → стар единичен път (обратна съвместимост).
+    """
+    vazlogiteli = extract_vazlogiteli(d)
+    if vazlogiteli:
+        lines = [f"{i+1}. {_single_vazlogitel_line(v)}" for i, v in enumerate(vazlogiteli)]
+        return "\n".join(lines)
+
+    # ── стар единичен път (обратна съвместимост) ──────────────────────────────
     tip   = d.get("Възложител_Тип", "Фирма")
     firma = d.get("Възложител_Фирма", "")
     adres = d.get("Възложител_Адрес", "")
@@ -67,6 +101,26 @@ def build_vazlogitel_block(d):
     if adres: parts.append(adres)
     if pred:  parts.append(f"представлявано от {pred}")
     return ", ".join(parts)
+
+
+def build_vazlogitel_podpisva_block(d):
+    """
+    ДОЛУ/ПОДПИСИ блок ({{Възложител_Подписва_Блок}}).
+    Ако Възложители_Брой липсва → стар единичен път (обратна съвместимост).
+    """
+    vazlogiteli = extract_vazlogiteli(d)
+    if vazlogiteli:
+        upalnom = d.get("Възложител_Упълномощен_Представител", "").strip()
+        if upalnom:
+            return upalnom
+        lines = []
+        for i, v in enumerate(vazlogiteli):
+            podp = v["podpisva"] or "………"
+            lines.append(f"{i+1}. {_single_vazlogitel_line(v)} — подписва: {podp}")
+        return "\n".join(lines)
+
+    # ── стар единичен път (обратна съвместимост) ──────────────────────────────
+    return d.get("Възложител_Подписва", "") or build_vazlogitel_block(d)
 
 def build_projectants_list(projectants):
     lines = []
@@ -154,10 +208,10 @@ def build_placeholders(d):
         "{{Възложител_Представител}}":   vaz_pr if vaz_tip not in ("Физическо лице","ФЛ") else "",
         "{{Възложител_2имена}}":         two_names(vaz_name_for_1i3),
         "{{Възложител_1и3}}":           one_and_three(vaz_name_for_1i3),
-        "{{Възложител_Блок}}":           build_vazlogitel_block(d),   # и (correct, matches template)
-        "{{Възложател_Блок}}":           build_vazlogitel_block(d),   # а (legacy alias)
-        "{{Възложител_Подписва_Блок}}":  d.get("Възложител_Подписва", "") or build_vazlogitel_block(d),  # и
-        "{{Възложател_Подписва_Блок}}":  d.get("Възложател_Подписва", "") or build_vazlogitel_block(d),  # а
+        "{{Възложител_Блок}}":           build_vazlogitel_block(d),          # и (correct)
+        "{{Възложател_Блок}}":           build_vazlogitel_block(d),          # а (legacy alias)
+        "{{Възложител_Подписва_Блок}}":  build_vazlogitel_podpisva_block(d), # и
+        "{{Възложател_Подписва_Блок}}":  build_vazlogitel_podpisva_block(d), # а (legacy alias)
         "{{РС_Номер}}":                  d.get("РС_Номер",""),
         "{{РС_Дата}}":                   fmt_date(d.get("РС_Дата","")),
         "{{РС_Издател}}":                d.get("РС_Издател",""),
