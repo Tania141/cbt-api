@@ -85,6 +85,8 @@ def build_vazlogitel_block(d):
     """
     vazlogiteli = extract_vazlogiteli(d)
     if vazlogiteli:
+        if len(vazlogiteli) == 1:
+            return _single_vazlogitel_line(vazlogiteli[0])
         lines = [f"{i+1}. {_single_vazlogitel_line(v)}" for i, v in enumerate(vazlogiteli)]
         return "\n".join(lines)
 
@@ -113,6 +115,9 @@ def build_vazlogitel_podpisva_block(d):
         upalnom = d.get("Възложител_Упълномощен_Представител", "").strip()
         if upalnom:
             return upalnom
+        if len(vazlogiteli) == 1:
+            v = vazlogiteli[0]
+            return v["podpisva"] or _single_vazlogitel_line(v)
         lines = []
         for i, v in enumerate(vazlogiteli):
             podp = v["podpisva"] or "………"
@@ -206,6 +211,14 @@ def build_placeholders(d):
         "{{Възложител_ЕИК}}":            d.get("Възложител_ЕИК","") if vaz_tip not in ("Физическо лице","ФЛ") else "",
         "{{Възложител_Адрес}}":          d.get("Възложител_Адрес",""),
         "{{Възложител_Представител}}":   vaz_pr if vaz_tip not in ("Физическо лице","ФЛ") else "",
+        # ── при нов списъчен контракт: overwrite горните 4 от clients[0] ──────
+        **({
+            "{{Възложител_Тип}}":          _vl[0]["tip"],
+            "{{Възложител_Фирма}}":        _vl[0]["firma"],
+            "{{Възложител_ЕИК}}":          _vl[0]["eik"],
+            "{{Възложител_Адрес}}":        _vl[0]["adres"],
+            "{{Възложител_Представител}}": _vl[0]["pred"],
+        } if (_vl := extract_vazlogiteli(d)) else {}),
         "{{Възложител_2имена}}":         two_names(vaz_name_for_1i3),
         "{{Възложител_1и3}}":           one_and_three(vaz_name_for_1i3),
         "{{Възложител_Блок}}":           build_vazlogitel_block(d),          # и (correct)
