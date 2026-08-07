@@ -133,19 +133,16 @@ def build_vazlogitel_podpisva_redove(d):
     Физически редове с точки за подписи — 'Б.: ......... (Иван Петров)'.
     Един ред на възложител. Замества {{Възложател_1и3}} в шаблоните.
     """
-    def _signing_name(v):
-        if v["podpisva"]:
-            return one_and_three(v["podpisva"])
-        if v["tip"] in ("Физическо лице", "ФЛ"):
-            return one_and_three(v["firma"])
-        return one_and_three(v["pred"]) if v["pred"] else one_and_three(v["firma"])
+    def _signing_line(v):
+        name = one_and_three(v["podpisva"]) if v["podpisva"] else ""
+        return f"Б.:  ..............................   ({name})" if name else "Б.:  .............................."
 
     vazlogiteli = extract_vazlogiteli(d)
     if vazlogiteli:
         upalnom = d.get("Възложител_Упълномощен_Представител", "").strip()
         if upalnom:
             return f"Б.:  ..............................   ({one_and_three(upalnom)})"
-        lines = [f"Б.:  ..............................   ({_signing_name(v)})" for v in vazlogiteli]
+        lines = [_signing_line(v) for v in vazlogiteli]
         return "\n".join(lines)
 
     # ── стар единичен път ──────────────────────────────────────────────────────
