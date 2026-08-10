@@ -960,6 +960,12 @@ def generate_document(doc_type):
     pi   = str(body.get("pi", "unknown"))
     repl = build_placeholders(d)
 
+    vaz_br = d.get("Възложители_Брой", "MISSING")
+    from cbt_docx import extract_vazlogiteli
+    vaz_list = extract_vazlogiteli(d)
+    print(f"[DEBUG generate/{doc_type}] PI={pi} Възложители_Брой={vaz_br!r} extract_count={len(vaz_list)}", flush=True)
+    print(f"[DEBUG generate/{doc_type}] Блок={repl.get('{{Възложател_Блок}}','MISSING')[:80]!r}", flush=True)
+
     if doc_type == "protokol2combined":
         print(f"[DEBUG protokol2combined] PI={pi} keys={sorted(d.keys())}", flush=True)
         print(f"[DEBUG protokol2combined] Геодезист={d.get('Геодезист','MISSING')} ПЖ_Конструктивна={repl.get('{{ПЖ_Конструктивна}}','MISSING')} ПЖ_Архитектура={repl.get('{{ПЖ_Архитектура}}','MISSING')}", flush=True)
