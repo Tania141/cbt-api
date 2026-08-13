@@ -11,12 +11,21 @@ from docx.oxml import OxmlElement
 
 # ── Name / date helpers ───────────────────────────────────────────────────────
 
-def two_names(s):
+_TITLES = {"инж", "арх", "проф", "д-р", "доц"}
+
+def _strip_title(s):
+    """Махни водеща титла, за да не се брои като собствено име."""
     parts = (s or "").strip().split()
+    if parts and parts[0].lower().rstrip(".") in _TITLES:
+        parts = parts[1:]
+    return " ".join(parts)
+
+def two_names(s):
+    parts = _strip_title(s).split()
     return " ".join(parts[:2])
 
 def one_and_three(s):
-    parts = (s or "").strip().split()
+    parts = _strip_title(s).split()
     if len(parts) >= 3:
         return f"{parts[0]} {parts[2]}"
     return " ".join(parts)
