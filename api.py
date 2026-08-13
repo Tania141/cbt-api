@@ -960,16 +960,6 @@ def generate_document(doc_type):
     pi   = str(body.get("pi", "unknown"))
     repl = build_placeholders(d)
 
-    from cbt_docx import extract_vazlogiteli
-    vaz_keys = [k for k in d if "Въз" in k]
-    print(f"[DEBUG generate/{doc_type}] PI={pi} d_len={len(d)} vaz_keys={vaz_keys}", flush=True)
-    vaz_list = extract_vazlogiteli(d)
-    print(f"[DEBUG generate/{doc_type}] extract_count={len(vaz_list)} Блок={repl.get('{{Възложател_Блок}}','MISSING')[:60]!r}", flush=True)
-
-    if doc_type == "protokol2combined":
-        print(f"[DEBUG protokol2combined] PI={pi} keys={sorted(d.keys())}", flush=True)
-        print(f"[DEBUG protokol2combined] Геодезист={d.get('Геодезист','MISSING')} ПЖ_Конструктивна={repl.get('{{ПЖ_Конструктивна}}','MISSING')} ПЖ_Архитектура={repl.get('{{ПЖ_Архитектура}}','MISSING')}", flush=True)
-
     if doc_type == "zapovedna":
         repl["{{Заповедна_Номер}}"] = body.get("zapovedna_number", "___")
         repl["{{Заповедна_Дата}}"]  = fmt_date(body.get("zapovedna_date", ""))
