@@ -95,6 +95,8 @@ def extract_vazlogiteli(d):
         "pred_title":     d.get(f"Възложител_{i}_Представител_Титла", ""),
         "podpisva":       d.get(f"Възложител_{i}_Подписва", ""),
         "podpisva_title": d.get(f"Възложител_{i}_Подписва_Титла", ""),
+        # липсващ ключ = подписва (обратна съвместимост със стария payload)
+        "signs":          str(d.get(f"Възложител_{i}_Подписва_Да", "1")).strip() not in ("", "0", "false", "False", "не"),
     } for i in range(1, n+1) if d.get(f"Възложител_{i}_Фирма", "")]
 
 
@@ -147,11 +149,12 @@ def build_vazlogitel_podpisva_block(d):
         upalnom = d.get("Възложител_Упълномощен_Представител", "").strip()
         if upalnom:
             return upalnom
-        if len(vazlogiteli) == 1:
-            v = vazlogiteli[0]
+        signers = [v for v in vazlogiteli if v["signs"]] or vazlogiteli
+        if len(signers) == 1:
+            v = signers[0]
             return with_title(v.get("podpisva_title"), v["podpisva"]) or _single_vazlogitel_line(v)
         lines = []
-        for i, v in enumerate(vazlogiteli):
+        for i, v in enumerate(signers):
             podp = with_title(v.get("podpisva_title"), v["podpisva"]) or "………"
             lines.append(f"{i+1}. {_single_vazlogitel_line(v)} — подписва: {podp}")
         return "\n".join(lines)
@@ -174,8 +177,10 @@ def build_vazlogitel_podpisva_redove(d):
         upalnom = d.get("Възложител_Упълномощен_Представител", "").strip()
         if upalnom:
             return f"Б.:  ..............................   ({one_and_three(upalnom)})"
-        lines = [_signing_line(v) for v in vazlogiteli]
-        return "\n".join(lines)
+        signers = [v for v in vazlogiteli if v["signs"]]
+        if not signers:                       # никой избран → празен ред за подпис
+            return "Б.:  .............................."
+        return "\n".join(_signing_line(v) for v in signers)
 
     # ── стар единичен път ──────────────────────────────────────────────────────
     vaz_podpisva = d.get("Възложател_Подписва", "")
