@@ -45,9 +45,7 @@ ANTHROPIC_API_KEY     = os.environ.get("ANTHROPIC_API_KEY", "")
 LOCAL_TEMPLATES_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
 TEMPLATE_FILES = {
-    "protokol2":         "Protokol_2_Template.docx",
     "protokol2combined": "Protokol_2_Combined_Template.docx",
-    "protokol2p2":       "Protokol_2_Part2_Template.docx",
     "protokol2a":        "Protokol_2a_Template.docx",
     "obrazec3":    "template_obrazec3.docx",
     "akt5":        "Akt_5_Template.docx",
@@ -66,9 +64,7 @@ TEMPLATE_FILES = {
 }
 
 DOC_LABELS = {
-    "protokol2":         "Протокол_2",
-    "protokol2combined": "Protokol_2_Combined",
-    "protokol2p2":       "Протокол_2_Част_2",
+    "protokol2combined": "Протокол_2",
     "protokol2a":        "Протокол_2а",
     "obrazec3":    "Obrazec_3",
     "akt5":        "Akt_5",
@@ -1379,8 +1375,7 @@ VALIDATION_SYSTEM_PROMPT = """Ти си експерт по българскот
 4. ФОРМАЛНИ ИЗИСКВАНИЯ — правилен формат на дати (дд.мм.гггг), номера на разрешения, ЕИК формат"""
 
 DOC_TYPE_CONTEXT = {
-    "protokol2":   "Протокол №2 за установяване годността за ползване на строежа (Приложение №2 към Наредба №3)",
-    "protokol2p2": "Протокол №2, Част 2 — допълнителни констатации",
+    "protokol2combined": "Протокол №2 за откриване на строителна площадка и определяне на строителна линия и ниво (Приложение №2 към Наредба №3)",
     "protokol2a":  "Протокол №2а по Наредба №3",
     "obrazec3":    "Образец №3 — констативен протокол",
     "akt5":        "Акт №5 за приемане на кофражи и армировка (Приложение №5 към Наредба №3)",
