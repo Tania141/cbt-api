@@ -29,6 +29,21 @@ def one_and_three(s):
     core = f"{parts[0]} {parts[2]}" if len(parts) >= 3 else " ".join(parts)
     return f"{title} {core}".strip() if core else ""
 
+def with_title(title, name):
+    """
+    Слепи титла + име — единственото място, където титла се долепя.
+    Ако името вече носи вградена титла (стари паспорти), не удвоява.
+    """
+    name = (name or "").strip()
+    if not name:
+        return ""
+    title = (title or "").strip()
+    if not title:
+        return name
+    if name.split()[0].lower().rstrip(".") in _TITLES:
+        return name
+    return f"{title} {name}"
+
 def fmt_date(v):
     if not v: return ""
     v = v.strip()
@@ -71,23 +86,27 @@ def extract_vazlogiteli(d):
     """Extract list of clients — same pattern as extract_employees/extract_projectants."""
     n = int(d.get("Възложители_Брой", 0) or 0)
     return [{
-        "tip":      d.get(f"Възложител_{i}_Тип", "ФЛ"),
-        "firma":    d.get(f"Възложител_{i}_Фирма", ""),
-        "eik":      d.get(f"Възложител_{i}_ЕИК", ""),
-        "adres":    d.get(f"Възложител_{i}_Адрес", ""),
-        "pred":     d.get(f"Възложител_{i}_Представител", ""),
-        "podpisva": d.get(f"Възложител_{i}_Подписва", ""),
+        "tip":            d.get(f"Възложител_{i}_Тип", "ФЛ"),
+        "firma":          d.get(f"Възложител_{i}_Фирма", ""),
+        "firma_title":    d.get(f"Възложител_{i}_Титла", ""),
+        "eik":            d.get(f"Възложител_{i}_ЕИК", ""),
+        "adres":          d.get(f"Възложител_{i}_Адрес", ""),
+        "pred":           d.get(f"Възложител_{i}_Представител", ""),
+        "pred_title":     d.get(f"Възложител_{i}_Представител_Титла", ""),
+        "podpisva":       d.get(f"Възложител_{i}_Подписва", ""),
+        "podpisva_title": d.get(f"Възложител_{i}_Подписва_Титла", ""),
     } for i in range(1, n+1) if d.get(f"Възложител_{i}_Фирма", "")]
 
 
 def _single_vazlogitel_line(v):
     """Format one client entry for the header block."""
     if v["tip"] in ("Физическо лице", "ФЛ"):
-        return v["firma"]
+        return with_title(v.get("firma_title"), v["firma"])
     parts = [v["firma"]]
     if v["eik"]:   parts.append(f"ЕИК {v['eik']}")
     if v["adres"]: parts.append(v["adres"])
-    if v["pred"]:  parts.append(f"представлявано от {_clean_pred(v['pred'])}")
+    if v["pred"]:
+        parts.append("представлявано от " + with_title(v.get("pred_title"), _clean_pred(v["pred"])))
     return ", ".join(parts)
 
 
@@ -130,10 +149,10 @@ def build_vazlogitel_podpisva_block(d):
             return upalnom
         if len(vazlogiteli) == 1:
             v = vazlogiteli[0]
-            return v["podpisva"] or _single_vazlogitel_line(v)
+            return with_title(v.get("podpisva_title"), v["podpisva"]) or _single_vazlogitel_line(v)
         lines = []
         for i, v in enumerate(vazlogiteli):
-            podp = v["podpisva"] or "………"
+            podp = with_title(v.get("podpisva_title"), v["podpisva"]) or "………"
             lines.append(f"{i+1}. {_single_vazlogitel_line(v)} — подписва: {podp}")
         return "\n".join(lines)
 
@@ -147,7 +166,7 @@ def build_vazlogitel_podpisva_redove(d):
     Един ред на възложител. Замества {{Възложател_1и3}} в шаблоните.
     """
     def _signing_line(v):
-        name = one_and_three(v["podpisva"]) if v["podpisva"] else ""
+        name = with_title(v.get("podpisva_title"), one_and_three(v["podpisva"])) if v["podpisva"] else ""
         return f"Б.:  ..............................   ({name})" if name else "Б.:  .............................."
 
     vazlogiteli = extract_vazlogiteli(d)
@@ -175,24 +194,24 @@ def build_projectants_list(projectants):
         name = p["name"]
         ppp = p["ppp"]
         kamara = "КАБ" if spec in ("Архитектура", "Паркоустройство и Благоустройство") else "КИИП"
-        line = "Част " + spec + ": " + title + " " + name
+        line = "Част " + spec + ": " + with_title(title, name)
         if ppp:
             line += ", рег. № " + ppp + " в " + kamara
         lines.append(line)
     return "\n".join(lines)
 
 def build_employees_list(employees):
-    return "\n".join(f"Част {e['specialization']}: {e['title']} {e['name']}" for e in employees)
+    return "\n".join(f"Част {e['specialization']}: {with_title(e['title'], e['name'])}" for e in employees)
 
 def build_projectants_signatures(projectants):
     return "\n".join(
-        f"Част {p['specialization']}: {p['title']} {p['name']} ….................................................................."
+        f"Част {p['specialization']}: {with_title(p['title'], p['name'])} ….................................................................."
         for p in projectants
     )
 
 def build_employees_signatures(employees):
     return "\n".join(
-        f"Част {e['specialization']}: {e['title']} {e['name']} ….................................................................."
+        f"Част {e['specialization']}: {with_title(e['title'], e['name'])} ….................................................................."
         for e in employees
     )
 
@@ -212,19 +231,35 @@ def build_placeholders(d):
     employees   = extract_employees(d)
     projectants = extract_projectants(d)
 
-    geo     = (by_spec(employees, "Геодезия") or [{}])[0].get("name", d.get("Геодезист",""))
-    sn_k    = (by_spec(employees, "Конструктивна") or [{}])[0].get("name", "")
-    pj_k    = (by_spec(projectants, "Конструктивна") or [{}])[0].get("name", "")
-    pj_arch = (by_spec(projectants, "Архитектура") or [{}])[0].get("name", "")
-    specs   = "; ".join(f"{e['title']} {e['name']} ({e['specialization']})" for e in employees) or d.get("Консултант_Управител","")
+    # ── лица от списъци: титлата идва от собственото им поле ──────────────────
+    def _person(items, spec, fallback_name=""):
+        p = (by_spec(items, spec) or [{}])[0]
+        return with_title(p.get("title", ""), p.get("name", "") or fallback_name)
+
+    geo     = _person(employees,   "Геодезия", d.get("Геодезист", ""))
+    sn_k    = _person(employees,   "Конструктивна")
+    pj_k    = _person(projectants, "Конструктивна")
+    pj_arch = _person(projectants, "Архитектура")
+    specs   = "; ".join(f"{with_title(e['title'], e['name'])} ({e['specialization']})" for e in employees) \
+              or d.get("Консултант_Управител","")
     vaz_tip = d.get("Възложител_Тип", "Фирма")
-    upr     = d.get("Консултант_Управител", "")
-    teh_ryk = d.get("Строител_ТехРък", "")
-    str_upr = d.get("Строител_Управител", "")
+    # ── лица от свободен текст: титлата е в отделен ключ ──────────────────────
+    upr     = with_title(d.get("Консултант_Управител_Титла",""), d.get("Консултант_Управител", ""))
+    teh_ryk = with_title(d.get("Строител_ТехРък_Титла",""),      d.get("Строител_ТехРък", ""))
+    str_upr = with_title(d.get("Строител_Управител_Титла",""),   d.get("Строител_Управител", ""))
     vaz_pr  = d.get("Възложител_Представител", "")
     # Възложител_1и3: prefer explicit signing person, fall back to ФЛ name or representative
     vaz_podpisva = d.get("Възложител_Подписва", "")
     vaz_name_for_1i3 = vaz_podpisva or (d.get("Възложител_Фирма", "") if vaz_tip in ("Физическо лице", "ФЛ") else vaz_pr)
+    # при нов списъчен контракт вземи титлата от clients[0]
+    _v0 = (extract_vazlogiteli(d) or [{}])[0]
+    if _v0:
+        _is_fl = _v0.get("tip") in ("Физическо лице", "ФЛ")
+        vaz_name_for_1i3 = with_title(
+            _v0.get("podpisva_title") if _v0.get("podpisva")
+            else (_v0.get("firma_title") if _is_fl else _v0.get("pred_title")),
+            _v0.get("podpisva") or (_v0.get("firma") if _is_fl else _clean_pred(_v0.get("pred", ""))),
+        )
 
     return {
         "{{Строеж}}":                    d.get("Строеж",""),
@@ -254,10 +289,11 @@ def build_placeholders(d):
         # ── при нов списъчен контракт: overwrite горните 4 от clients[0] ──────
         **({
             "{{Възложител_Тип}}":          _vl[0]["tip"],
-            "{{Възложител_Фирма}}":        _vl[0]["firma"],
+            "{{Възложител_Фирма}}":        with_title(_vl[0]["firma_title"], _vl[0]["firma"])
+                                           if _vl[0]["tip"] in ("Физическо лице","ФЛ") else _vl[0]["firma"],
             "{{Възложител_ЕИК}}":          _vl[0]["eik"],
             "{{Възложител_Адрес}}":        _vl[0]["adres"],
-            "{{Възложител_Представител}}": _vl[0]["pred"],
+            "{{Възложител_Представител}}": with_title(_vl[0]["pred_title"], _clean_pred(_vl[0]["pred"])),
         } if (_vl := extract_vazlogiteli(d)) else {}),
         "{{Възложител_2имена}}":         two_names(vaz_name_for_1i3),
         "{{Възложител_1и3}}":           one_and_three(vaz_name_for_1i3),
