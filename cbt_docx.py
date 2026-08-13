@@ -28,6 +28,11 @@ def fmt_date(v):
     try: return datetime.fromisoformat(v[:10]).strftime("%d.%m.%Y")
     except: return v
 
+def _clean_pred(s):
+    """Махни водещо 'от ' — шаблонът вече долепя 'представлявано от'."""
+    s = (s or "").strip()
+    return s[3:].strip() if s.lower().startswith("от ") else s
+
 
 # ── People extractors (used only by build_placeholders) ───────────────────────
 
@@ -74,7 +79,7 @@ def _single_vazlogitel_line(v):
     parts = [v["firma"]]
     if v["eik"]:   parts.append(f"ЕИК {v['eik']}")
     if v["adres"]: parts.append(v["adres"])
-    if v["pred"]:  parts.append(f"представлявано от {v['pred']}")
+    if v["pred"]:  parts.append(f"представлявано от {_clean_pred(v['pred'])}")
     return ", ".join(parts)
 
 
@@ -101,7 +106,7 @@ def build_vazlogitel_block(d):
     parts = [firma]
     if eik:   parts.append(f"ЕИК {eik}")
     if adres: parts.append(adres)
-    if pred:  parts.append(f"представлявано от {pred}")
+    if pred:  parts.append(f"представлявано от {_clean_pred(pred)}")
     return ", ".join(parts)
 
 
@@ -273,6 +278,7 @@ def build_placeholders(d):
         "{{Конструктивна}}":              pj_k,
         "{{Конструктивна_1и3}}":          one_and_three(pj_k),
         "{{ПЖ_Конструктивна}}":           pj_k,
+        "{{constructor_name}}":           pj_k,
         "{{ПЖ_Конструктивна_1и3}}":       one_and_three(pj_k),
         "{{ПЖ_Конструктивна _1и3}}":      one_and_three(pj_k),   # alias: space typo in template
         "{{ПЖ_Архитектура}}":             pj_arch,
