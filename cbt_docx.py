@@ -13,22 +13,21 @@ from docx.oxml import OxmlElement
 
 _TITLES = {"инж", "арх", "проф", "д-р", "доц"}
 
-def _strip_title(s):
-    """Махни водеща титла, за да не се брои като собствено име."""
+def _split_title(s):
+    """Отдели водеща титла от имената — титлата не бива да се брои като име."""
     parts = (s or "").strip().split()
     if parts and parts[0].lower().rstrip(".") in _TITLES:
-        parts = parts[1:]
-    return " ".join(parts)
+        return parts[0], parts[1:]
+    return "", parts
 
 def two_names(s):
-    parts = _strip_title(s).split()
-    return " ".join(parts[:2])
+    title, parts = _split_title(s)
+    return " ".join(([title] if title else []) + parts[:2])
 
 def one_and_three(s):
-    parts = _strip_title(s).split()
-    if len(parts) >= 3:
-        return f"{parts[0]} {parts[2]}"
-    return " ".join(parts)
+    title, parts = _split_title(s)
+    core = f"{parts[0]} {parts[2]}" if len(parts) >= 3 else " ".join(parts)
+    return f"{title} {core}".strip() if core else ""
 
 def fmt_date(v):
     if not v: return ""
