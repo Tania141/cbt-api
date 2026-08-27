@@ -260,6 +260,7 @@ _PARTS = {
     "Електро":         "Електро",
     "ОВК":             "ОВК и ЕЕ",
     "Геодезия":        "Геодезия",
+    "Геология":        "Инженерна геология и хидрогеология",
     "Паркоустройство": "Паркоустройство и Благоустройство",
     "Газоснабдяване":  "Газоснабдяване",
     "ПБ":              "ПБ",
@@ -399,6 +400,7 @@ def build_placeholders(d):
            for k, v in (
                (f"{{{{ПЖ_{short}}}}}",      _person(projectants, spec)),
                (f"{{{{ПЖ_{short}_1и3}}}}",  one_and_three(_person(projectants, spec))),
+               (f"{{{{СН_{short}}}}}",      _person(employees, spec)),
                (f"{{{{СН_{short}_1и3}}}}",  one_and_three(_person(employees, spec))),
            )},
         "{{ПЖ_Провод}}":                  build_projectant_provod(projectants),
