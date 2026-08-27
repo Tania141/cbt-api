@@ -45,6 +45,7 @@ ANTHROPIC_API_KEY     = os.environ.get("ANTHROPIC_API_KEY", "")
 LOCAL_TEMPLATES_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
 TEMPLATE_FILES = {
+    "protokol1":         "Protokol_1_Template.docx",
     "protokol2combined": "Protokol_2_Combined_Template.docx",
     "protokol2a":        "Protokol_2a_Template.docx",
     "obrazec3":    "template_obrazec3.docx",
@@ -64,6 +65,7 @@ TEMPLATE_FILES = {
 }
 
 DOC_LABELS = {
+    "protokol1":         "Протокол_1",
     "protokol2combined": "Протокол_2",
     "protokol2a":        "Протокол_2а",
     "obrazec3":    "Obrazec_3",
@@ -1375,6 +1377,7 @@ VALIDATION_SYSTEM_PROMPT = """Ти си експерт по българскот
 4. ФОРМАЛНИ ИЗИСКВАНИЯ — правилен формат на дати (дд.мм.гггг), номера на разрешения, ЕИК формат"""
 
 DOC_TYPE_CONTEXT = {
+    "protokol1":   "Протокол за предаване и приемане на одобрения проект и влязлото в сила разрешение за строеж за изпълнение на конкретния строеж (Приложение №1, т. 1)",
     "protokol2combined": "Протокол за откриване на строителна площадка и за определяне на строителна линия и ниво (Приложение №2 към Наредба №3, чл. 7, ал. 3, т. 2)",
     "protokol2a":  "Протокол за откриване на строителна площадка и за определяне на строителна линия и ниво — за линейни обекти на техническата инфраструктура (Приложение №2а, чл. 7, ал. 3, т. 2)",
     "obrazec3":    "Констативен акт за установяване съответствието на строежа с издадените строителни книжа и за това, че подробният устройствен план е приложен по отношение на застрояването (Приложение №3, т. 3)",
