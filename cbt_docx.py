@@ -322,6 +322,7 @@ def build_placeholders(d):
         "{{СН_Електро}}":                 _person(employees, "Електро"),
         "{{СН_ВиК}}":                     _person(employees, "ВиК"),
         "{{СН_Геодезия}}":                _person(employees, "Геодезия"),
+        "{{СН_Геодезия_1и3}}":            one_and_three(_person(employees, "Геодезия")),
         "{{СН_ПБ}}":                      _person(employees, "ПБ"),
         "{{СН_Пътна}}":                   _person(employees, "Пътна"),
         "{{СН_ОВК}}":                     _person(employees, "ОВК и ЕЕ"),
