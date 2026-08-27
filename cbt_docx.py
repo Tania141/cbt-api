@@ -254,6 +254,37 @@ def _normalize_cokul(raw: str) -> str:
     return s
 
 
+# Части по Наредба №3: късо име за маркера → специализация, както се въвежда в PWA.
+_PARTS = {
+    "ВиК":             "ВиК",
+    "Електро":         "Електро",
+    "ОВК":             "ОВК и ЕЕ",
+    "Геодезия":        "Геодезия",
+    "Паркоустройство": "Паркоустройство и Благоустройство",
+    "Газоснабдяване":  "Газоснабдяване",
+    "ПБ":              "ПБ",
+    "СХИ":             "СХИ",
+    "Пътна":           "Пътна",
+}
+
+# Части, които съставляват самия провод при линеен обект (Протокол 2а).
+# Архитектура, Конструктивна, Геодезия, ПБ и др. придружават строежа, но не са проводът.
+_PROVOD_PARTS = ("ВиК", "Електро", "Газоснабдяване", "ОВК и ЕЕ", "Пътна")
+
+
+def build_projectant_provod(projectants):
+    """
+    Проектантът на съответния провод — за Протокол 2а, където проводът е един.
+    Взима проектантите по инфраструктурните части; ако са няколко (обща
+    траншея), изрежда ги. Ако няма такъв — празно, за ръчно попълване.
+    """
+    hits = [p for p in projectants if p.get("specialization") in _PROVOD_PARTS]
+    return "; ".join(
+        f"{with_title(p['title'], p['name'])} — част {p['specialization']}"
+        for p in hits if p.get("name")
+    )
+
+
 def build_placeholders(d):
     employees   = extract_employees(d)
     projectants = extract_projectants(d)
@@ -361,6 +392,19 @@ def build_placeholders(d):
         "{{ПЖ_Архитектура}}":             pj_arch,
         "{{ПЖ_Архитектура_1и3}}":         one_and_three(pj_arch),
         "{{ПЖ_Архитектура _1и3}}":        one_and_three(pj_arch), # alias: space typo in template
+        # ── проектанти и СН по останалите части ──────────────────────────────
+        # Маркерът е късото име; специализацията в паспорта може да е по-дълга.
+        **{k: v
+           for short, spec in _PARTS.items()
+           for k, v in (
+               (f"{{{{ПЖ_{short}}}}}",      _person(projectants, spec)),
+               (f"{{{{ПЖ_{short}_1и3}}}}",  one_and_three(_person(projectants, spec))),
+               (f"{{{{СН_{short}_1и3}}}}",  one_and_three(_person(employees, spec))),
+           )},
+        "{{ПЖ_Провод}}":                  build_projectant_provod(projectants),
+        "{{ПЖ_Провод_1и3}}":              "; ".join(
+            f"{one_and_three(with_title(p['title'], p['name']))} — част {p['specialization']}"
+            for p in projectants if p.get("specialization") in _PROVOD_PARTS and p.get("name")),
         "{{Вода}}":                      d.get("Вода", ""),
         "{{Канализация}}":               d.get("Канализация", ""),
         "{{Ел_Захранване}}":             d.get("Ел_Захранване", ""),
