@@ -317,6 +317,7 @@ def build_placeholders(d):
         "{{consultant_specialists}}":    specs,
         "{{sn_konstruktivna}}":          sn_k,
         "{{СН_Конструктивна}}":          sn_k,
+        "{{СН_Конструктивна_1и3}}":      one_and_three(sn_k),
         "{{СН_Архитектура}}":             _person(employees, "Архитектура"),
         "{{СН_Електро}}":                 _person(employees, "Електро"),
         "{{СН_ВиК}}":                     _person(employees, "ВиК"),
