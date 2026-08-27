@@ -163,24 +163,29 @@ def build_vazlogitel_podpisva_block(d):
     return d.get("Възложител_Подписва", "") or build_vazlogitel_block(d)
 
 
-def build_vazlogitel_podpisva_redove(d):
+def _podpisni_redove(d, prefix):
     """
-    Физически редове с точки за подписи — 'Б.: ......... (Иван Петров)'.
-    Един ред на възложител. Замества {{Възложател_1и3}} в шаблоните.
+    Редове с точки за подписи на възложителите — по един на подписващ.
+    `prefix` е буквата на раздела в конкретния образец ('Б.:  ' в Протокол 2,
+    празно в Акт 15, където разделът е 'А.').
     """
-    def _signing_line(v):
-        name = with_title(v.get("podpisva_title"), one_and_three(v["podpisva"])) if v["podpisva"] else ""
-        return f"Б.:  ..............................   ({name})" if name else "Б.:  .............................."
+    DOTS = ".............................."
+
+    def line(name):
+        return f"{prefix}{DOTS}   ({name})" if name else f"{prefix}{DOTS}"
 
     vazlogiteli = extract_vazlogiteli(d)
     if vazlogiteli:
         upalnom = d.get("Възложител_Упълномощен_Представител", "").strip()
         if upalnom:
-            return f"Б.:  ..............................   ({one_and_three(upalnom)})"
+            return line(one_and_three(upalnom))
         signers = [v for v in vazlogiteli if v["signs"]]
         if not signers:                       # никой избран → празен ред за подпис
-            return "Б.:  .............................."
-        return "\n".join(_signing_line(v) for v in signers)
+            return line("")
+        return "\n".join(
+            line(with_title(v.get("podpisva_title"), one_and_three(v["podpisva"])) if v["podpisva"] else "")
+            for v in signers
+        )
 
     # ── стар единичен път ──────────────────────────────────────────────────────
     vaz_podpisva = d.get("Възложател_Подписва", "")
@@ -188,7 +193,17 @@ def build_vazlogitel_podpisva_redove(d):
     vaz_pr    = d.get("Възложител_Представител", "")
     vaz_firma = d.get("Възложител_Фирма", "")
     name = vaz_podpisva or (vaz_firma if vaz_tip in ("Физическо лице", "ФЛ") else vaz_pr)
-    return f"Б.:  ..............................   ({one_and_three(name)})"
+    return line(one_and_three(name))
+
+
+def build_vazlogitel_podpisva_redove(d):
+    """Подписни редове с префикс 'Б.:' — Протокол 2."""
+    return _podpisni_redove(d, "Б.:  ")
+
+
+def build_vazlogiteli_podpisni_redove(d):
+    """Подписни редове без префикс — шаблонът си слага своята буква."""
+    return _podpisni_redove(d, "")
 
 
 def build_projectants_list(projectants):
@@ -204,6 +219,13 @@ def build_projectants_list(projectants):
             line += ", рег. № " + ppp + " в " + kamara
         lines.append(line)
     return "\n".join(lines)
+
+def build_projectants_names(projectants):
+    """Кратък вид за хедъра: 'арх. Ивайло Найденов; инж. Петър Иванов'."""
+    return "; ".join(
+        with_title(p["title"], one_and_three(p["name"]))
+        for p in projectants if p.get("name")
+    )
 
 def build_employees_list(employees):
     return "\n".join(f"Част {e['specialization']}: {with_title(e['title'], e['name'])}" for e in employees)
@@ -310,6 +332,7 @@ def build_placeholders(d):
         "{{Възложител_Подписва_Блок}}":  build_vazlogitel_podpisva_block(d), # и
         "{{Възложател_Подписва_Блок}}":  build_vazlogitel_podpisva_block(d), # а (legacy alias)
         "{{Възложател_Подписва_Редове}}": build_vazlogitel_podpisva_redove(d),
+        "{{Възложители_Подписни_Редове}}": build_vazlogiteli_podpisni_redove(d),
         "{{РС_Номер}}":                  d.get("РС_Номер",""),
         "{{РС_Дата}}":                   fmt_date(d.get("РС_Дата","")),
         "{{РС_Издател}}":                d.get("РС_Издател",""),
@@ -342,6 +365,7 @@ def build_placeholders(d):
         "{{Канализация}}":               d.get("Канализация", ""),
         "{{Ел_Захранване}}":             d.get("Ел_Захранване", ""),
         "{{Проектанти_Списък}}":         build_projectants_list(projectants),
+        "{{Проектанти_Имена}}":          build_projectants_names(projectants),
         "{{Консултанти_Списък}}":        build_employees_list(employees),
         "{{Проектанти_Подписи}}":        build_projectants_signatures(projectants),
         "{{Консултанти_Подписи}}":       build_employees_signatures(employees),
