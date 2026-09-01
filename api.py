@@ -63,6 +63,7 @@ TEMPLATE_FILES = {
     "zapovedna":   "Zapovedna_Template.docx",
     "akt15":       "Akt_15_Template.docx",
     "akt16":       "Akt_16_Template.docx",
+    "protokol17":  "Protokol_17_Template.docx",
     "doklad":      "Okonchatelen_Doklad_Template.docx",
 }
 
@@ -85,6 +86,7 @@ DOC_LABELS = {
     "zapovedna":   "Zapovedna_Kniga",
     "akt15":       "Akt_15",
     "akt16":       "Akt_16",
+    "protokol17":  "Protokol_17",
     "doklad":      "Okonchatelen_Doklad",
 }
 
@@ -1399,6 +1401,7 @@ DOC_TYPE_CONTEXT = {
     "zapovedna":   "Заповедна книга на строежа (Приложение №4, т. 4); заверява се от лицето по чл. 158, ал. 2 ЗУТ",
     "akt15":       "Констативен акт за установяване годността за приемане на строежа (част, етап от него) (Приложение №15, т. 15)",
     "akt16":       "Протокол за установяване годността за ползване на строежа (Приложение №16, т. 16)",
+    "protokol17":  "Протокол за проведена 72-часова проба при експлоатационни условия (Приложение №17, т. 17)",
     "doklad":      "Окончателен доклад на консултанта (строителен надзор) по чл. 168, ал. 6 ЗУТ",
 }
 
