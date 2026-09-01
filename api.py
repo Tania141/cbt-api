@@ -968,6 +968,16 @@ def generate_document(doc_type):
         repl["{{Заповедна_Номер}}"] = body.get("zapovedna_number", "___")
         repl["{{Заповедна_Дата}}"]  = fmt_date(body.get("zapovedna_date", ""))
 
+    if doc_type == "akt12":
+        # Частта идва при генериране, не от паспорта — един строеж дава много
+        # актове, по един за всяка част. Затова тук се преизчислява.
+        chast = (body.get("chast") or "").strip()
+        if chast:
+            d = dict(d)
+            d["Част"] = chast
+            d["Акт12_Номер"] = str(body.get("akt12_number", "")).strip()
+            repl = build_placeholders(d)
+
     download_name = f"{doc_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
 
     try:
