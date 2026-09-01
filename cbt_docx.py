@@ -365,6 +365,10 @@ def build_placeholders(d):
         "{{Възложател_Подписва_Блок}}":  build_vazlogitel_podpisva_block(d), # а (legacy alias)
         "{{Възложател_Подписва_Редове}}": build_vazlogitel_podpisva_redove(d),
         "{{Възложители_Подписни_Редове}}": build_vazlogiteli_podpisni_redove(d),
+        # Заповедна книга — номер и дата; стоят на корицата и в етикета за прошнуроване.
+        # Празно поле остава на точки, както се попълва на ръка в заверените книги.
+        "{{ЗК_Номер}}":                  d.get("ЗК_Номер","").strip() or "………………",
+        "{{ЗК_Дата}}":                   fmt_date(d.get("ЗК_Дата","")) or "…………………",
         "{{РС_Номер}}":                  d.get("РС_Номер",""),
         "{{РС_Дата}}":                   fmt_date(d.get("РС_Дата","")),
         "{{РС_Издател}}":                d.get("РС_Издател",""),
@@ -496,6 +500,21 @@ def replace_in_runs(para, replacements):
             r.text = ""
     return False
 
+def _fill_textboxes(part_element, doc, replacements):
+    """Заместване вътре в текстовите полета.
+
+    Параграфите в <w:txbxContent> не се виждат от doc.paragraphs — те седят
+    вложени в w:drawing / w:pict. Без това етикетът за прошнуроване на
+    Заповедната книга се разпечатваше с буквални {{Строеж}} и {{Адрес}}.
+    Word пази текстовото поле в две копия (drawing и pict fallback);
+    iter() ги хваща и двете, за да не се разминат.
+    """
+    from docx.text.paragraph import Paragraph
+    for txbx in part_element.iter(qn("w:txbxContent")):
+        for p_el in txbx.iter(qn("w:p")):
+            replace_in_runs(Paragraph(p_el, doc), replacements)
+
+
 def fill_template(doc, replacements):
     paras = list(doc.paragraphs)
     for para in paras:
@@ -510,4 +529,7 @@ def fill_template(doc, replacements):
             replace_in_runs(para, replacements)
         for para in section.footer.paragraphs:
             replace_in_runs(para, replacements)
+        _fill_textboxes(section.header._element, doc, replacements)
+        _fill_textboxes(section.footer._element, doc, replacements)
+    _fill_textboxes(doc.element.body, doc, replacements)
     return doc
