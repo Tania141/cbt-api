@@ -967,8 +967,18 @@ def generate_document(doc_type):
     repl = build_placeholders(d)
 
     if doc_type == "zapovedna":
-        repl["{{Заповедна_Номер}}"] = body.get("zapovedna_number", "___")
-        repl["{{Заповедна_Дата}}"]  = fmt_date(body.get("zapovedna_date", ""))
+        # Номерът и датата идват от паспорта ({{ЗК_Номер}} / {{ЗК_Дата}}).
+        # Ако при генериране е подадена стойност, тя има превес — операторът
+        # може да коригира, без да отваря паспорта.
+        num = str(body.get("zapovedna_number", "")).strip()
+        dat = str(body.get("zapovedna_date", "")).strip()
+        if num or dat:
+            d = dict(d)
+            if num:
+                d["ЗК_Номер"] = num
+            if dat:
+                d["ЗК_Дата"] = dat
+            repl = build_placeholders(d)
 
     if doc_type == "osip":
         # Изходящият номер е на доклада, не на проекта: един строеж може да получи
