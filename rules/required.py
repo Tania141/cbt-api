@@ -30,6 +30,9 @@ NABOR = [
     ("obrazec3",   "Констативен акт обр. 3",                VSICHKI,   None),
     ("akt5",       "Акт 5",                                 PARVI_TRI, None),
     ("akt6",       "Акт 6",                                 PARVI_TRI, None),
+    # Протокол 17 е ограничен до 1–3 категория, но и там се съставя ПО ПОИСКВАНЕ —
+    # затова стои и в PO_SABITIE и никога не се изисква автоматично.
+    ("protokol17", "Протокол 17 — 72-часова проба",         PARVI_TRI, "po_poiskvane"),
     ("akt7",       "Акт 7",                                 VSICHKI,   None),
     ("akt8",       "Акт 8 — фундаменти за монтаж",           VSICHKI,   "montazh"),
     ("akt9",       "Акт 9 — машини и съоръжения",            VSICHKI,   "mashini"),
@@ -42,10 +45,15 @@ NABOR = [
 ]
 
 # Никога не се изискват автоматично — само при настъпило събитие или по поискване.
+#
+# Акт 13 (щети от непреодолима сила) НЕ е тук и не е никъде другаде: по решение
+# на оператора от 02.09 той отпада от системата. Съставя се рядко, операторът не
+# е свикнал с него, и един акт на ръка е по-евтин от постоянно присъствие в
+# списъци, което не носи полза. Шаблонът и ключът в бекенда остават — махнат е
+# само от изборите пред оператора.
 PO_SABITIE = {
     "akt10":      "Акт 10 — спиране на строителството",
     "akt11":      "Акт 11 — продължаване",
-    "akt13":      "Акт 13 — щети от непреодолима сила",
     "protokol17": "Протокол 17 — 72-часова проба (при поискване)",
 }
 
@@ -57,6 +65,8 @@ def _uslovie_izpalneno(project, cond):
         return bool(project.get("imaMashini"))
     if cond == "montazh":
         return bool(project.get("imaMashini")) or bool(project.get("metalnaKonstrukcia"))
+    if cond == "po_poiskvane":
+        return False        # никога не се изисква само по себе си
     return True
 
 
@@ -138,18 +148,20 @@ def nabor_pylnota(project):
          _p(kategoria="5", docDates=dict(_PALEN, akt5="20.03.2024")), WARN),
         ("трета категория с Акт 5 — нормално",
          _p(kategoria="3", docDates=dict(_PALEN, akt5="20.03.2024")), OK),
-        ("Акт 13 при бедствие — по събитие, не се брои",
-         _p(kategoria="5", docDates=dict(_PALEN, akt13="05.05.2024")), OK),
+        ("Акт 10 при спиране — по събитие, не се брои",
+         _p(kategoria="5", docDates=dict(_PALEN, akt10="05.05.2024")), OK),
+        ("Протокол 17 на пета категория — не се изисква там",
+         _p(kategoria="5", docDates=dict(_PALEN, protokol17="05.05.2024")), WARN),
     ],
 )
 def nabor_izlishni(project):
-    iz = iziskvani(project)
-    if iz is None:
+    if iziskvani(project) is None:
         return Verdict(UNKNOWN, "Категорията на строежа не е посочена.")
-    ochakvani = {k for k, _ in iz} | set(PO_SABITIE)
-    izlishni = [t for k, t, _, _ in NABOR
-                if k not in ochakvani and _vpisan(project, k)]
     kat = int(project["kategoria"])
+    # Съди се по КАТЕГОРИЯ, не по условията. Акт 9 без отметнати машини не е
+    # излишен — просто условието още не е обявено; да се вика за него е шум.
+    izlishni = [t for k, t, kats, _ in NABOR
+                if kat not in kats and _vpisan(project, k)]
     if not izlishni:
         return Verdict(OK, f"Няма вписани документи извън набора за {kat}. категория.")
     return Verdict(WARN, f"Вписани, но неизисквани за {kat}. категория: " + ", ".join(izlishni) +
