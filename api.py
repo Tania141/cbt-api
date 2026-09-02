@@ -64,6 +64,7 @@ TEMPLATE_FILES = {
     "akt15":       "Akt_15_Template.docx",
     "akt16":       "Akt_16_Template.docx",
     "protokol17":  "Protokol_17_Template.docx",
+    "osip":        "OSIP_Template.docx",
     "doklad":      "Okonchatelen_Doklad_Template.docx",
 }
 
@@ -87,6 +88,7 @@ DOC_LABELS = {
     "akt15":       "Akt_15",
     "akt16":       "Akt_16",
     "protokol17":  "Protokol_17",
+    "osip":        "OSIP_Kompleksen_Doklad",
     "doklad":      "Okonchatelen_Doklad",
 }
 
@@ -968,6 +970,15 @@ def generate_document(doc_type):
         repl["{{Заповедна_Номер}}"] = body.get("zapovedna_number", "___")
         repl["{{Заповедна_Дата}}"]  = fmt_date(body.get("zapovedna_date", ""))
 
+    if doc_type == "osip":
+        # Изходящият номер е на доклада, не на проекта: един строеж може да получи
+        # доклад за техническа и отделно за работна фаза.
+        if body.get("osip_number") or body.get("osip_date"):
+            d = dict(d)
+            d["Изх_Номер"] = str(body.get("osip_number", "")).strip()
+            d["Изх_Дата"]  = str(body.get("osip_date", "")).strip()
+            repl = build_placeholders(d)
+
     if doc_type == "akt12":
         # Частта идва при генериране, не от паспорта — един строеж дава много
         # актове, по един за всяка част. Затова тук се преизчислява.
@@ -1412,6 +1423,7 @@ DOC_TYPE_CONTEXT = {
     "akt15":       "Констативен акт за установяване годността за приемане на строежа (част, етап от него) (Приложение №15, т. 15)",
     "akt16":       "Протокол за установяване годността за ползване на строежа (Приложение №16, т. 16)",
     "protokol17":  "Протокол за проведена 72-часова проба при експлоатационни условия (Приложение №17, т. 17)",
+    "osip":        "Комплексен доклад за оценка на съответствието на инвестиционния проект (ОСИП) по чл. 142, ал. 5 и чл. 169, ал. 1 ЗУТ",
     "doklad":      "Окончателен доклад на консултанта (строителен надзор) по чл. 168, ал. 6 ЗУТ",
 }
 
