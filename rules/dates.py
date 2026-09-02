@@ -219,3 +219,53 @@ def akt7_period(project):
     br = a7.get("br") or "?"
     return Verdict(OK, f"{br} акта обр. 7 в периода {ot.strftime('%d.%m.%Y')} – "
                        f"{do.strftime('%d.%m.%Y')} — в границите на строителството.")
+
+
+# ── 6. Актове обр. 12 — по части ──────────────────────────────────────────────
+
+@rule(
+    code="D6",
+    title="Актовете обр. 12 са по части и в границите на строителството",
+    citation="Наредба № 3, Приложение № 12 — актът се съставя за всички видове СМР, "
+             "подлежащи на закриване; проектантът и техн. правоспособното лице са ПО СЪОТВЕТНАТА ЧАСТ.",
+    what="Актовете за скрити работи се водят с отделна поредица за всяка част "
+         "(Арх-1, ВиК-1…) и идват накуп, затова се вписват като брой и период за част. "
+         "Всеки период трябва да е между Протокол 2 и Акт 14.",
+    cases=[
+        ("две части, в границите",
+         _p(docDates={"protokol2": "14.03.2024", "akt14": "20.06.2025",
+                      "akt12": {"Архитектура": {"br": "4", "ot": "01.04.2024", "do": "10.06.2025"},
+                                "ВиК":         {"br": "3", "ot": "05.05.2024", "do": "01.06.2025"}}}), OK),
+        ("една част излиза извън срока",
+         _p(docDates={"protokol2": "14.03.2024", "akt14": "20.06.2025",
+                      "akt12": {"Архитектура": {"br": "4", "ot": "01.04.2024", "do": "10.06.2025"},
+                                "Електро":     {"br": "2", "ot": "01.04.2024", "do": "25.06.2025"}}}), WARN),
+        ("още няма",
+         _p(docDates={"protokol2": "14.03.2024"}), UNKNOWN),
+    ],
+)
+def akt12_po_chasti(project):
+    p2 = doc_date(project, "protokol2")
+    a14 = doc_date(project, "akt14")
+    grupi = (project.get("docDates") or {}).get("akt12") or {}
+    if not grupi:
+        return Verdict(UNKNOWN, "Още няма актове обр. 12.")
+    problemi, dobri, obshto = [], [], 0
+    for chast, rec in sorted(grupi.items()):
+        ot, do = parse_date(rec.get("ot")), parse_date(rec.get("do"))
+        if not ot or not do:
+            problemi.append(f"{chast}: непълен период")
+            continue
+        obshto += int(rec.get("br") or 0) if str(rec.get("br", "")).isdigit() else 0
+        if do < ot:
+            problemi.append(f"{chast}: началото е след края")
+        elif p2 and ot < p2:
+            problemi.append(f"{chast}: започва преди Протокол 2")
+        elif a14 and do > a14:
+            problemi.append(f"{chast}: свършва след Акт 14")
+        else:
+            dobri.append(chast)
+    if problemi:
+        return Verdict(WARN, "Актове обр. 12 — " + "; ".join(problemi) + ".")
+    return Verdict(OK, f"{obshto} акта обр. 12 по {len(dobri)} части "
+                       f"({', '.join(dobri)}) — в границите на строителството.")

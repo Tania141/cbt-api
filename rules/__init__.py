@@ -24,6 +24,7 @@ rules — правилата за верификация на строителн
 половината дати още ги няма — и операторът спира да гледа предупрежденията.
 """
 from .engine import Rule, Verdict, OK, WARN, UNKNOWN, run_all, ALL_RULES
-from . import dates  # noqa: F401  — регистрира правилата за срокове
+from . import dates     # noqa: F401  — правилата за срокове
+from . import required  # noqa: F401  — изискваният набор по категория
 
 __all__ = ["Rule", "Verdict", "OK", "WARN", "UNKNOWN", "run_all", "ALL_RULES"]
