@@ -21,6 +21,15 @@ TPL_DIR = os.path.join(ROOT, "templates")
 
 MARKER = re.compile(r"\{\{[^}]+\}\}")
 
+# Маркер, който КОДЪТ нарочно записва: repl["{{Нещо}}"] = …
+# Ако никой шаблон не го иска, стойността се изчислява и се изхвърля мълчаливо.
+# Точно това стана на 02.09 със Заповедната книга: endpoint-ът пълнеше
+# {{Заповедна_Номер}}, а шаблонът вече искаше {{ЗК_Номер}}. Номерът, въведен от
+# оператора, не стигаше до документа. Като „сираче“ не се забеляза — сирачетата
+# са близо шейсет и са безобидни, защото никой не се старае да ги попълни.
+WRITTEN_MARKER = re.compile(r"""\w+\[\s*["'](\{\{[^}]+\}\})["']\s*\]\s*=""")
+CODE_FILES = ("api.py", "cbt_docx.py")
+
 # ── ГРЕШКИ: шаблонът дублира работата на кода ────────────────────────────────
 # Блоковите маркери сами носят цялата фраза — пред тях не се пише нищо.
 TITLE_BEFORE_MARKER = re.compile(r"(инж\.|арх\.|проф\.|доц\.|д-р)\s*\{\{")
@@ -102,6 +111,18 @@ def main():
         for leg, why in LEGACY.items():
             if leg in blob:
                 legacy_hits.append((name, leg, why))
+
+    # Маркери, които кодът записва нарочно, а никой шаблон не иска.
+    for fname in CODE_FILES:
+        p = os.path.join(ROOT, fname)
+        if not os.path.isfile(p):
+            continue
+        src = open(p, encoding="utf-8").read()
+        for m in sorted(set(WRITTEN_MARKER.findall(src))):
+            if m not in used:
+                errors.append((fname, "МЪРТЪВ МАРКЕР",
+                               f"{m} — кодът го записва, но никой шаблон не го иска; "
+                               f"стойността се изхвърля мълчаливо"))
 
     orphans = sorted(known - used)
 
