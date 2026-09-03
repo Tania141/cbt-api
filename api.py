@@ -42,6 +42,9 @@ DROPBOX_APP_SECRET    = os.environ.get("DROPBOX_APP_SECRET", "")
 DROPBOX_FOLDER        = os.environ.get("DROPBOX_FOLDER", "/AKT_Projects")
 ANTHROPIC_API_KEY     = os.environ.get("ANTHROPIC_API_KEY", "")
 
+# Езиковият модел — на едно място, за да не се разминават петте извиквания.
+AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-4-6")
+
 LOCAL_TEMPLATES_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
 TEMPLATE_FILES = {
@@ -225,10 +228,23 @@ def init_db():
     print("PostgreSQL: таблиците са готови")
 
 def log_action(action, user_id=None, tenant_id=None, detail=None,
-               doc_type=None, status=None, tokens_in=None, tokens_out=None, validation=None):
+               doc_type=None, status=None, tokens_in=None, tokens_out=None, validation=None,
+               model=None):
+    """Вписва действие в одитната следа.
+
+    `model` е името и версията на езиковия модел, произвел преценката. Без него
+    записът казва „AI-ят реши“, а след две години това не значи нищо: моделите
+    се обновяват и остаряват. Преценка в правен документ трябва да може да се
+    отнесе към конкретен модел от конкретна дата.
+
+    Взима се от отговора на API-то (`response.model`), не от заявката — там е
+    РАЗРЕШЕНАТА версия, а не псевдонимът, който сме поискали.
+    """
     conn = get_db()
     if not conn:
         return
+    if model:
+        detail = {**(detail or {}), "model": model}
     try:
         with conn:
             with conn.cursor() as cur:
@@ -1139,7 +1155,7 @@ def ai_generate():
         })
 
         response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=AI_MODEL,
             max_tokens=4000,
             messages=[{"role": "user", "content": content}]
         )
@@ -1148,6 +1164,15 @@ def ai_generate():
             block.text for block in response.content
             if hasattr(block, "text")
         )
+
+        log_action("ai_generate",
+                   user_id=request.current_user.get("sub"),
+                   tenant_id=request.current_user.get("tenant_id"),
+                   model=getattr(response, "model", AI_MODEL),
+                   doc_type=body.get("doc_type"),
+                   tokens_in=response.usage.input_tokens,
+                   tokens_out=response.usage.output_tokens,
+                   detail={"pi": body.get("pi")})
 
         return jsonify({
             "status": "ok",
@@ -1175,11 +1200,18 @@ def ai_chat():
     max_tokens   = int(body.get("max_tokens", 4000))
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        kwargs = dict(model="claude-sonnet-4-6", max_tokens=max_tokens, messages=messages)
+        kwargs = dict(model=AI_MODEL, max_tokens=max_tokens, messages=messages)
         if system_prompt:
             kwargs["system"] = system_prompt
         response = client.messages.create(**kwargs)
         result_text = "".join(b.text for b in response.content if hasattr(b, "text"))
+        log_action("ai_chat",
+                   user_id=request.current_user.get("sub"),
+                   tenant_id=request.current_user.get("tenant_id"),
+                   model=getattr(response, "model", AI_MODEL),
+                   tokens_in=response.usage.input_tokens,
+                   tokens_out=response.usage.output_tokens,
+                   detail={"broi_sabshteniya": len(messages)})
         return jsonify({
             "status": "ok",
             "result": result_text,
@@ -1241,7 +1273,7 @@ def ai_extract_protokol2():
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=AI_MODEL,
             max_tokens=1000,
             messages=[{"role": "user", "content": content}]
         )
@@ -1259,7 +1291,9 @@ def ai_extract_protokol2():
                 return jsonify({"error": "Claude не върна валиден JSON", "raw": raw}), 502
 
         log_action("ai_extract_protokol2", user_id=user_id, tenant_id=tenant_id,
-                   detail=f"PI={pi} tokens={response.usage.input_tokens}+{response.usage.output_tokens}")
+                   model=getattr(response, "model", AI_MODEL),
+                   tokens_in=response.usage.input_tokens, tokens_out=response.usage.output_tokens,
+                   detail={"pi": pi})
 
         return jsonify({
             "status": "ok",
@@ -1344,7 +1378,7 @@ def ai_kategoria_smisyl():
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=AI_MODEL,
             max_tokens=600,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -1362,8 +1396,9 @@ def ai_kategoria_smisyl():
             return jsonify({"error": "Неочакван отговор", "raw": raw}), 502
 
         log_action("ai_kategoria_smisyl", user_id=user_id, tenant_id=tenant_id,
-                   detail={"kade": kade, "otgovor": rez.get("otgovor"),
-                           "tokens": f"{response.usage.input_tokens}+{response.usage.output_tokens}"})
+                   model=getattr(response, "model", AI_MODEL),
+                   tokens_in=response.usage.input_tokens, tokens_out=response.usage.output_tokens,
+                   detail={"kade": kade, "otgovor": rez.get("otgovor")})
 
         # Двата текста се връщат заедно с преценката — операторът трябва да може
         # да я провери с поглед, а не да ѝ вярва.
@@ -1458,7 +1493,7 @@ def ai_generate_akt15_sgrada():
         content.append({"type": "text", "text": prompt})
 
         response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=AI_MODEL,
             max_tokens=2000,
             messages=[{"role": "user", "content": content}]
         )
@@ -1472,6 +1507,7 @@ def ai_generate_akt15_sgrada():
         log_action(
             "generate_akt15_sgrada",
             user_id=user_id, tenant_id=tenant_id,
+            model=getattr(response, "model", AI_MODEL),
             doc_type="akt15",
             status=validation_result.get("status"),
             tokens_in=response.usage.input_tokens,
@@ -1577,7 +1613,7 @@ def validate_document(doc_type):
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=AI_MODEL,
             max_tokens=2000,
             system=VALIDATION_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}]
@@ -1599,7 +1635,10 @@ def validate_document(doc_type):
         result.setdefault("suggestions", [])
 
         log_action("validate_doc", user_id=user_id, tenant_id=tenant_id,
-                   detail={"doc_type": doc_type, "status": result["status"], "score": result["score"]})
+                   model=getattr(response, "model", AI_MODEL), doc_type=doc_type,
+                   status=result["status"],
+                   tokens_in=response.usage.input_tokens, tokens_out=response.usage.output_tokens,
+                   detail={"score": result["score"], "issues": len(result.get("issues", []))})
 
         return jsonify({
             **result,
