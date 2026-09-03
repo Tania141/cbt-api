@@ -1274,6 +1274,115 @@ def ai_extract_protokol2():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/ai/kategoria-smisyl", methods=["POST"])
+@require_auth
+def ai_kategoria_smisyl():
+    """Попада ли описаният строеж в цитираната разпоредба от Наредба № 1.
+
+    РАЗДЕЛЕНИЕТО: AI-ят ЧЕТЕ, кодът СЪДИ.
+
+    Кодът разчита цитата и намира ДОСЛОВНИЯ текст на разпоредбата в заключената
+    наредба. AI-ят получава само две неща — описанието на строежа и този текст —
+    и отговаря дали едното попада в другото. Той не търси разпоредбата, не
+    определя категория и не преценява какво „би трябвало“ да е.
+
+    Изходът се ЗАПИСВА в паспорта и правило K4 го показва заедно с двата текста,
+    за да може операторът да провери преценката с поглед. Затова AI-ят е тук, а
+    не вътре в правилото: правило, което вика мрежа, спира да е проверимо.
+    """
+    tenant_id = request.current_user.get("tenant_id")
+    user_id = request.current_user["sub"]
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
+
+    body = request.get_json() or {}
+    opisanie = (body.get("opisanie") or "").strip()
+    citat = (body.get("citat") or "").strip()
+    if not opisanie:
+        return jsonify({"error": "Липсва описание на строежа"}), 400
+    if not citat:
+        return jsonify({"error": "Липсва цитатът от раздел А"}), 400
+
+    from rules.kategoria import cheti_citat
+    from rules.naredba1 import Naredba
+
+    d = cheti_citat(citat)
+    if "chl" not in d:
+        return jsonify({"status": "ne_moga",
+                        "obosnovka": "В цитата не се разчита член и алинея от Наредба № 1."})
+    n = Naredba()
+    if not n.ok:
+        return jsonify({"status": "ne_moga", "obosnovka": n.prichina})
+    r, err = n.razporedba(d["chl"], d["al"], d.get("t"))
+    if err:
+        return jsonify({"status": "ne_moga", "obosnovka": err})
+
+    razporedba = r["zaglavie"] + (("\n" + r["tochka"]) if r["tochka"] else "")
+    kade = f"чл. {d['chl']}, ал. {d['al']}" + (f", т. {d['t']}" if "t" in d else "")
+
+    prompt = f"""Ти си строителен инженер, който проверява дали един строеж попада в
+дадена разпоредба от Наредба № 1 за номенклатурата на видовете строежи.
+
+ОПИСАНИЕ НА СТРОЕЖА:
+{opisanie}
+
+ЦИТИРАНАТА РАЗПОРЕДБА ({kade}):
+{razporedba}
+
+Отговори САМО дали описаният строеж попада в текста на тази разпоредба.
+
+Правила:
+- Съди по ВИДА и ПРЕДНАЗНАЧЕНИЕТО на строежа и по числовите прагове в текста.
+- Ако разпоредбата покрива друг вид строежи, отговорът е "ne".
+- Ако описанието не съдържа нужното, за да прецениш, отговорът е "ne_moga".
+- НЕ определяй коя е правилната категория. НЕ предлагай друга разпоредба.
+- Обосновката е едно-две изречения на български, като цитираш израза от
+  разпоредбата, на който стъпваш.
+
+Върни само JSON: {{"otgovor": "da" | "ne" | "ne_moga", "obosnovka": "..."}}"""
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = "".join(b.text for b in response.content if hasattr(b, "text")).strip()
+        try:
+            rez = json.loads(raw)
+        except json.JSONDecodeError:
+            import re as _re
+            m = _re.search(r"\{.*\}", raw, _re.DOTALL)
+            if not m:
+                return jsonify({"error": "Claude не върна валиден JSON", "raw": raw}), 502
+            rez = json.loads(m.group())
+
+        if rez.get("otgovor") not in ("da", "ne", "ne_moga"):
+            return jsonify({"error": "Неочакван отговор", "raw": raw}), 502
+
+        log_action("ai_kategoria_smisyl", user_id=user_id, tenant_id=tenant_id,
+                   detail={"kade": kade, "otgovor": rez.get("otgovor"),
+                           "tokens": f"{response.usage.input_tokens}+{response.usage.output_tokens}"})
+
+        # Двата текста се връщат заедно с преценката — операторът трябва да може
+        # да я провери с поглед, а не да ѝ вярва.
+        return jsonify({
+            "status": "ok",
+            "otgovor": rez["otgovor"],
+            "obosnovka": rez.get("obosnovka", ""),
+            "kade": kade,
+            "razporedba": razporedba,
+            "opisanie": opisanie,
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+        })
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Claude API грешка: {str(e)}"}), 502
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/ai/generate-akt15-sgrada", methods=["POST"])
 @require_auth
 def ai_generate_akt15_sgrada():
