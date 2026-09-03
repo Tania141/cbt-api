@@ -19,6 +19,61 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from rules import naredba1 as n1  # noqa: E402
+from rules import naredba7 as n7  # noqa: E402
+
+
+def naredba7(pin):
+    """Сверява числовата таблица по зони срещу текста на Наредба № 7."""
+    print("\n" + "═" * 60)
+    print("НАРЕДБА № 7 — устройствени показатели по зони")
+
+    import glob, re, hashlib
+    pdf = None
+    for d in n1._TARSI:
+        hit = glob.glob(os.path.join(d, "НАРЕДБА № 7*.pdf"))
+        if hit:
+            pdf = hit[0]
+            break
+    if not pdf:
+        print("✗ Наредба № 7 не е намерена до хранилището.")
+        return 1
+
+    # Огледалото на текста се пази в хранилището — за да е сверката бърза и
+    # промяната да се вижда в diff. Пресъздава се само когато PDF-ът се смени.
+    sha = hashlib.sha256(open(pdf, "rb").read()).hexdigest()
+    star = json.load(open(n7.LOCK, encoding="utf-8")) if os.path.isfile(n7.LOCK) else {}
+    if not os.path.isfile(n7.MIRROR) or star.get("sha256") != sha:
+        print("   извличане на текста от PDF…")
+        from pdfminer.high_level import extract_text
+        text = re.sub(r"\s+", " ", extract_text(pdf))
+        open(n7.MIRROR, "w", encoding="utf-8").write(text)
+    else:
+        text = open(n7.MIRROR, encoding="utf-8").read()
+
+    print(f"файл:   {os.path.basename(pdf)[:52]}…")
+    print(f"sha256: {sha[:16]}…")
+    lipsvat = n7.sveri(text)
+    if lipsvat:
+        print(f"\n⚠️ {len(lipsvat)} израза от таблицата не се намират в наредбата:")
+        for x in lipsvat:
+            print("   ·", x)
+        print("\nТаблицата е остаряла или наредбата е изменена. Правилата за")
+        print("градоустройство ще връщат „не може да се провери“.")
+        return 1
+
+    print(f"✅ Всичките {sum(len(v) for v in n7.IZRAZI.values())} израза "
+          f"от {len(n7.ZONI)} зони се намират в текста.")
+    if pin:
+        json.dump({"file": os.path.basename(pdf), "sha256": sha,
+                   "zoni": sorted(n7.ZONI), "sverena": True},
+                  open(n7.LOCK, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        print(f"✅ Записан отпечатък: {os.path.basename(n7.LOCK)}")
+    else:
+        ok, prichina = n7.zakliuchena()
+        if not ok:
+            print(f"⚠️ {prichina}")
+            return 1
+    return 0
 
 
 def main():
@@ -42,8 +97,8 @@ def main():
     r = n1.razliki(nov, star)
     print()
     if not r:
-        print("✅ Наредбата съвпада със заключения отпечатък.")
-        return 0
+        print("✅ Наредба № 1 съвпада със заключения отпечатък.")
+        return naredba7("--pin" in sys.argv)
 
     print("⚠️ Разлики спрямо заключеното:")
     for x in r:

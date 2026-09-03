@@ -28,5 +28,6 @@ from . import dates     # noqa: F401  — правилата за срокове
 from . import required  # noqa: F401  — изискваният набор по категория
 from . import team      # noqa: F401  — екипът на обекта: има ли кой да подпише
 from . import kategoria # noqa: F401  — категорията срещу цитираните разпоредби
+from . import gradoustroystvo  # noqa: F401  — проект ≤ виза ≤ Наредба № 7
 
 __all__ = ["Rule", "Verdict", "OK", "WARN", "UNKNOWN", "run_all", "ALL_RULES"]
