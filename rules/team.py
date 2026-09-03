@@ -22,10 +22,16 @@ def _p(**kw):
     return d
 
 
-_SN = [{"name": "Мария Георгиева", "specialization": "Архитектура", "title": "арх."},
-       {"name": "Николай Петров", "specialization": "ВиК"}]
-_PJ = [{"name": "Анна Колева", "specialization": "Архитектура", "title": "арх."},
-       {"name": "Петър Димов", "specialization": "ВиК"}]
+from .realni import GURMAZOVO as R_GUR, izmeni
+
+# Екипът и проектантите са от реалния доклад за Гурмазово.
+_SN = R_GUR["employees"]
+_PJ = R_GUR["projectants"]
+
+
+def _gur(**dd):
+    """Гурмазово с вписани актове обр. 12 по части."""
+    return izmeni(R_GUR, docDates={**(R_GUR.get("docDates") or {}), **dd})
 
 
 @rule(
@@ -38,19 +44,16 @@ _PJ = [{"name": "Анна Колева", "specialization": "Архитектур
          "специалист на надзора по тази част и проектант по нея. Ако липсва, актът няма кой "
          "да го подпише правоспособно.",
     cases=[
-        ("двете части са покрити",
-         _p(employees=_SN, projectants=_PJ,
-            docDates={"akt12": {"Архитектура": {"br": "2"}, "ВиК": {"br": "1"}}}), OK),
-        ("акт по Електро, но никой по Електро не участва",
-         _p(employees=_SN, projectants=_PJ,
-            docDates={"akt12": {"Архитектура": {"br": "2"}, "Електро": {"br": "1"}}}), WARN),
-        ("има специалист, липсва проектант по частта",
-         _p(employees=_SN + [{"name": "Иван Стоев", "specialization": "Електро"}], projectants=_PJ,
-            docDates={"akt12": {"Електро": {"br": "1"}}}), WARN),
-        ("още няма актове обр. 12",
-         _p(employees=_SN, projectants=_PJ, docDates={}), UNKNOWN),
-        ("екипът още не е избран",
-         _p(projectants=_PJ, docDates={"akt12": {"ВиК": {"br": "1"}}}), UNKNOWN),
+        ("ГУРМАЗОВО — актове по Архитектура и ВиК, и двете покрити",
+         _gur(akt12={"Архитектура": {"br": "2"}, "ВиК": {"br": "1"}}), OK),
+        ("същият обект с акт по ОВК — по тази част никой не участва",
+         _gur(akt12={"Архитектура": {"br": "2"}, "ОВК и ЕЕ": {"br": "1"}}), WARN),
+        ("акт по Геодезия — има специалист, няма проектант по частта",
+         izmeni(_gur(akt12={"Геодезия": {"br": "1"}}),
+                projectants=[p for p in _PJ if p["specialization"] != "Геодезия"]), WARN),
+        ("ГУРМАЗОВО както е днес — още няма актове обр. 12", R_GUR, UNKNOWN),
+        ("същият обект преди да е избран екипът",
+         izmeni(_gur(akt12={"ВиК": {"br": "1"}}), employees=None), UNKNOWN),
     ],
 )
 def akt12_ima_koj_da_podpishe(project):
@@ -88,9 +91,9 @@ def akt12_ima_koj_da_podpishe(project):
          "Ако изборът не е направен, документите изброяват целия заверен списък на фирмата — "
          "включително хора, които не са стъпвали на строежа.",
     cases=[
-        ("избран екип", _p(employees=_SN), OK),
-        ("никой не е отметнат", _p(employees=[]), WARN),
-        ("изборът още не е правен", _p(), UNKNOWN),
+        ("ГУРМАЗОВО — петима специалисти по части", R_GUR, OK),
+        ("същият обект без отметнат специалист", izmeni(R_GUR, employees=[]), WARN),
+        ("изборът още не е правен", izmeni(R_GUR, employees=None), UNKNOWN),
     ],
 )
 def ekip_izbran(project):

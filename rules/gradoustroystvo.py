@@ -53,8 +53,15 @@ def _p(zona=None, viza=None, proekt=None, darvesna=None):
     return {"gradoustroystvo": g}
 
 
-VIZA_GURMAZOVO = {"plytnost": "40,0", "kint": "1,0", "ozel": "50,0"}
-PROEKT_GURMAZOVO = {"plytnost": "23,0", "kint": "0,35", "ozel": "50,0"}
+from .realni import GURMAZOVO as R_GUR, izmeni
+
+_G = R_GUR["gradoustroystvo"]
+VIZA_GURMAZOVO, PROEKT_GURMAZOVO = _G["viza"], _G["proekt"]
+
+
+def _gur(**promeni):
+    """Гурмазово с променен показател — формата и имената остават истински."""
+    return izmeni(R_GUR, gradoustroystvo={**_G, **promeni})
 
 
 @rule(
@@ -66,12 +73,11 @@ PROEKT_GURMAZOVO = {"plytnost": "23,0", "kint": "0,35", "ozel": "50,0"}
          "да ги надвишава. Озеленяването е МИНИМУМ — постигнатото не бива да е под него. "
          "Обратният знак на озеленяването е най-честият пропуск при бърз преглед.",
     cases=[
-        ("ГУРМАЗОВО — в рамките",
-         _p(viza=VIZA_GURMAZOVO, proekt=PROEKT_GURMAZOVO), OK),
-        ("плътността надвишава визата",
-         _p(viza=VIZA_GURMAZOVO, proekt=dict(PROEKT_GURMAZOVO, plytnost="45,0")), WARN),
-        ("озеленяването е под минимума",
-         _p(viza=VIZA_GURMAZOVO, proekt=dict(PROEKT_GURMAZOVO, ozel="42,0")), WARN),
+        ("ГУРМАЗОВО — както е в доклада", R_GUR, OK),
+        ("същият обект с плътност 45% по проект",
+         _gur(proekt=dict(PROEKT_GURMAZOVO, plytnost="45,0")), WARN),
+        ("същият обект с озеленяване 42% — под изискваните 50%",
+         _gur(proekt=dict(PROEKT_GURMAZOVO, ozel="42,0")), WARN),
         ("още няма показатели от проекта", _p(viza=VIZA_GURMAZOVO), UNKNOWN),
         ("още няма виза", _p(proekt=PROEKT_GURMAZOVO), UNKNOWN),
     ],
@@ -111,12 +117,11 @@ def proekt_sreshtu_viza(project):
          "който наредбата поставя за зоната. Таблицата с диапазоните е сверена срещу "
          "текста на наредбата и заключена — при изменение правилото млъква.",
     cases=[
-        ("ГУРМАЗОВО — зона Жм, визата е в нормата",
-         _p(zona="Жм", viza=VIZA_GURMAZOVO), OK),
-        ("плътност 70% в Жм — над горната граница 60%",
-         _p(zona="Жм", viza=dict(VIZA_GURMAZOVO, plytnost="70")), WARN),
-        ("озеленяване 30% в Жм — под долната граница 40%",
-         _p(zona="Жм", viza=dict(VIZA_GURMAZOVO, ozel="30")), WARN),
+        ("ГУРМАЗОВО — зона Жм, визата е в нормата", R_GUR, OK),
+        ("същата виза с плътност 70% — над горната граница 60% за Жм",
+         _gur(viza=dict(VIZA_GURMAZOVO, plytnost="70")), WARN),
+        ("същата виза с озеленяване 30% — под долната граница 40% за Жм",
+         _gur(viza=dict(VIZA_GURMAZOVO, ozel="30")), WARN),
         ("производствена зона Пч", _p(zona="Пч", viza={"plytnost": "60", "kint": "1,5", "ozel": "30"}), OK),
         ("зоната не е посочена", _p(viza=VIZA_GURMAZOVO), UNKNOWN),
         ("непозната зона", _p(zona="Ху", viza=VIZA_GURMAZOVO), UNKNOWN),
@@ -170,10 +175,12 @@ def viza_sreshtu_naredba(project):
          "озеленяване, а не и делът с дървесна растителност. Съотношението е една трета, "
          "но при вилна зона — една втора.",
     cases=[
-        ("Жм — една трета е налице", _p(zona="Жм", proekt={"ozel": "50"}, darvesna="20"), OK),
-        ("Жм — под една трета", _p(zona="Жм", proekt={"ozel": "50"}, darvesna="12"), WARN),
-        ("вилна зона — иска се половината", _p(zona="Ов", proekt={"ozel": "50"}, darvesna="20"), WARN),
-        ("не е попълнено", _p(zona="Жм", proekt={"ozel": "50"}), UNKNOWN),
+        ("ГУРМАЗОВО с 20% дървесна при 50% озеленяване — една трета е налице",
+         _gur(darvesna="20"), OK),
+        ("същият обект с 12% дървесна — под една трета", _gur(darvesna="12"), WARN),
+        ("същите числа във вилна зона — там се иска половината",
+         _gur(zona="Ов", darvesna="20"), WARN),
+        ("ГУРМАЗОВО както е в доклада — делът не се доказва", R_GUR, UNKNOWN),
     ],
 )
 def darvesna_rastitelnost(project):

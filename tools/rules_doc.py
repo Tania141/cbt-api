@@ -47,6 +47,26 @@ def build():
       "защото половината дати още ги няма — и операторът спира да гледа предупрежденията.\n")
     w("---\n")
 
+    # Кои правила стъпват на реални обекти — случай с "_ime" идва от rules/realni.py
+    realni = {r.code: sorted({p["_ime"] for _, p, _ in r.cases if isinstance(p, dict) and "_ime" in p})
+              for r in ALL_RULES}
+    izmisleni = [r.code for r in ALL_RULES if not realni[r.code]]
+
+    w("## Върху какви данни са доказани\n")
+    w("Случаят е доказателство само ако данните са истински. Тест с ръчно написан "
+      "речник проверява кода срещу допусканията на този, който го е писал — "
+      "*(02.09: такъв тест минаваше зелено, докато production излизаше с празен възложител)*.\n")
+    w("| правило | обекти |")
+    w("|---|---|")
+    for r in ALL_RULES:
+        w(f"| {r.code} | " + (" · ".join(realni[r.code]) if realni[r.code]
+                              else "⚠️ **измислени данни**") + " |")
+    w("")
+    if izmisleni:
+        w(f"> **Още не са доказани с реални обекти:** {', '.join(izmisleni)}. "
+          f"Липсват датите на съставяне от истински строежи — виж списъка накрая.\n")
+    w("---\n")
+
     for r in ALL_RULES:
         w(f"## {r.code} · {r.title}\n")
         w(f"**Основание.** {r.citation}\n")
@@ -62,6 +82,19 @@ def build():
             v = r.check(project)
             w(f"- **{name}** → {STATUS[v.status]} — {v.message}")
         w("\n</details>\n")
+        w("---\n")
+
+    from rules.realni import lipsvashti
+    lip = lipsvashti()
+    if lip:
+        w("## Какво още липсва, за да са доказани всички правила\n")
+        w("Данните долу ги има само операторът. Дотогава правилата за срокове се "
+          "доказват с измислени числа.\n")
+        w("| обект | липсва |")
+        w("|---|---|")
+        for obekt, kakvo in lip:
+            w(f"| {obekt} | {kakvo} |")
+        w("")
         w("---\n")
 
     total = sum(len(r.cases) for r in ALL_RULES)

@@ -92,11 +92,16 @@ def _p(**kw):
     return d
 
 
-_PALEN = {"protokol1": "01.02.2024", "protokol2": "14.03.2024", "zk_zaverka": "17.03.2024",
-          "obrazec3": "20.04.2024", "akt7": {"br": "9", "ot": "01.04.2024", "do": "10.05.2025"},
-          "akt12": {"ВиК": {"br": "3", "ot": "01.04.2024", "do": "10.05.2025"}},
-          "akt14": "20.06.2025", "akt15": "01.07.2025", "doklad": "10.07.2025",
-          "osip": "12.01.2024"}
+from .realni import DENKA, izmeni
+
+# Пълният набор — реалните дати на Денка, допълнени с документите, които
+# окончателният доклад не изброява поименно.
+_PALEN = {**DENKA["docDates"], "protokol1": "10.03.2022", "osip": "20.11.2021",
+          "akt15": "10.04.2025", "akt16": "25.04.2025"}
+
+
+def _denka(**promeni):
+    return izmeni(DENKA, docDates={**_PALEN, **promeni})
 
 
 @rule(
@@ -110,16 +115,14 @@ _PALEN = {"protokol1": "01.02.2024", "protokol2": "14.03.2024", "zk_zaverka": "1
          "още не са вписани в регистъра. Документите по събитие — Акт 10, 11, 13 и "
          "Протокол 17 — не се изискват никога автоматично.",
     cases=[
-        ("пета категория, наборът е пълен",
-         _p(kategoria="5", docDates=dict(_PALEN)), OK),
-        ("пета категория — Акт 5 и 6 не се искат",
-         _p(kategoria="5", docDates=dict(_PALEN)), OK),
-        ("трета категория — Акт 5, 6 и 16 вече се искат",
-         _p(kategoria="3", docDates=dict(_PALEN)), WARN),
-        ("има машини, но няма Акт 9",
-         _p(kategoria="5", imaMashini=True, docDates=dict(_PALEN)), WARN),
-        ("категорията не е посочена",
-         _p(docDates=dict(_PALEN)), UNKNOWN),
+        ("ДЕНКА — трета категория, наборът е пълен", _denka(), OK),
+        ("същият обект без Акт 16 — при трета категория се изисква",
+         izmeni(DENKA, docDates={k: v for k, v in _PALEN.items() if k != "akt16"}), WARN),
+        ("същите документи при пета категория — Акт 5, 6 и 16 не се искат",
+         izmeni(_denka(), kategoria="5"), OK),
+        ("ДЕНКА с машини, но без Акт 8 и 9",
+         izmeni(_denka(), imaMashini=True), WARN),
+        ("категорията не е посочена", izmeni(_denka(), kategoria=""), UNKNOWN),
     ],
 )
 def nabor_pylnota(project):
@@ -144,14 +147,12 @@ def nabor_pylnota(project):
          "Не е грешка — може да е съставен по преценка — но си струва да се погледне, "
          "защото често е признак за сбъркана категория.",
     cases=[
-        ("пета категория с Акт 5 — необичайно",
-         _p(kategoria="5", docDates=dict(_PALEN, akt5="20.03.2024")), WARN),
-        ("трета категория с Акт 5 — нормално",
-         _p(kategoria="3", docDates=dict(_PALEN, akt5="20.03.2024")), OK),
-        ("Акт 10 при спиране — по събитие, не се брои",
-         _p(kategoria="5", docDates=dict(_PALEN, akt10="05.05.2024")), OK),
-        ("Протокол 17 на пета категория — не се изисква там",
-         _p(kategoria="5", docDates=dict(_PALEN, protokol17="05.05.2024")), WARN),
+        ("ДЕНКА — трета категория, Акт 5, 6 и 16 са на място", _denka(), OK),
+        ("същите документи, но обявени за пета категория",
+         izmeni(_denka(), kategoria="5"), WARN),
+        ("Акт 10 при спиране — по събитие, не се брои за излишен", _denka(), OK),
+        ("Протокол 17 при пета категория — там не се изисква",
+         izmeni(_denka(protokol17="05.05.2025"), kategoria="5"), WARN),
     ],
 )
 def nabor_izlishni(project):
