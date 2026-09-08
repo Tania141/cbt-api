@@ -69,8 +69,20 @@ NAME_FAMILIES = ["ПЖ_Архитектура", "ПЖ_Конструктивна
 # Шаблони, минали през стиловия стандарт. Само те се проверяват по него.
 # Списъкът расте с всеки преработен шаблон — виж КОНВЕНЦИЯ.md.
 STILOVI_SHABLONI = {
+    # еталоните
     "Akt_7_Template.docx",
     "Protokol_2_Combined_Template.docx",
+    # първа вълна — 08.09.2026
+    "Protokol_1_Template.docx",
+    "template_obrazec3.docx",
+    "Akt_5_Template.docx",
+    "Akt_6_Template.docx",
+    "Akt_8_Template.docx",
+    "Akt_9_Template.docx",
+    "Akt_10_Template.docx",
+    "Akt_11_Template.docx",
+    "Akt_12_Template.docx",
+    "template_akt14_1.docx",
 }
 
 LEGACY = {
