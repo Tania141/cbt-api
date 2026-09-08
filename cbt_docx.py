@@ -427,7 +427,8 @@ def build_placeholders(d):
         "{{Възложател_Блок}}":           build_vazlogitel_block(d),          # а (legacy alias)
         "{{Възложител_Подписва_Блок}}":  build_vazlogitel_podpisva_block(d), # и
         "{{Възложател_Подписва_Блок}}":  build_vazlogitel_podpisva_block(d), # а (legacy alias)
-        "{{Възложател_Подписва_Редове}}": build_vazlogitel_podpisva_redove(d),
+        "{{Възложител_Подписва_Редове}}": build_vazlogitel_podpisva_redove(d), # и
+        "{{Възложател_Подписва_Редове}}": build_vazlogitel_podpisva_redove(d), # а (legacy alias)
         "{{Възложители_Подписни_Редове}}": build_vazlogiteli_podpisni_redove(d),
         # ОСИП — комплексен доклад за оценка на съответствието.
         # Изходящият номер идва при генериране (един строеж може да получи доклад

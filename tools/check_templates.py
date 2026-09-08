@@ -43,8 +43,27 @@ WRAPPED_REDOVE      = re.compile(r"[.\(]\s*\{\{[^}]*Подписва_Редов�
 # (дефектът от 13.08: „по част Архитектура" веднъж с пълно име, веднъж с _1и3)
 SIBLING_LINE = re.compile(r"^\s*\d+\s*[.)]\s*(по част|\.{3,})")
 
+# Подписен ред: има поле за подпис (точки или долни черти) преди маркера.
+# Само там е допустима кратката форма _1и3 — в описателен ред се пише пълното
+# име. Разграничението е решено на 08.09.2026 върху двата еталона.
+PODPISEN_RED = re.compile(r"[.…_]{6,}")
+
+# ── ГРЕШКИ по стиловия стандарт (08.09.2026) ────────────────────────────────
+PRAVI_KAVICHKI = re.compile(r'"')          # само български „ “
+BUKVALNA_CHERTA = re.compile(r"\|")        # остатък от таблица в текста
+KRATKA_V_OPISATELEN = re.compile(r"\{\{[^}]+_1и3\}\}")
+# Повторена буква в подписен блок: „В. Строителя … В. Геодезист“
+BUKVA_V_PODPIS = re.compile(r"^\s*([А-Я])\.\s")
+
 NAME_FAMILIES = ["ПЖ_Архитектура", "ПЖ_Конструктивна", "Конструктивна",
                  "Геодезист", "Управител", "ТехРък", "Строител_Управител"]
+
+# Шаблони, минали през стиловия стандарт. Само те се проверяват по него.
+# Списъкът расте с всеки преработен шаблон — виж КОНВЕНЦИЯ.md.
+STILOVI_SHABLONI = {
+    "Akt_7_Template.docx",
+    "Protokol_2_Combined_Template.docx",
+}
 
 LEGACY = {
     "Възложател_":               "правописен дублет с „а“ вместо „и“",
@@ -70,15 +89,58 @@ def all_text(doc):
 
 
 def sibling_mismatch(lines):
-    """Едно семейство имена, изписано и пълно, и съкратено, в еднотипни редове."""
+    """Едно семейство имена, изписано и пълно, и съкратено, в еднотипни редове.
+
+    Подписните редове са изключени: там кратката форма е правилната. Разнобой
+    има само когато двете форми се срещат в редове от един и същи вид.
+    """
     out = []
     for fam in NAME_FAMILIES:
         full, short = "{{%s}}" % fam, "{{%s_1и3}}" % fam
-        sib_full = [l for l in lines if SIBLING_LINE.match(l) and full in l]
-        sib_short = [l for l in lines if SIBLING_LINE.match(l) and short in l]
+        def sib(marker):
+            return [l for l in lines
+                    if SIBLING_LINE.match(l) and marker in l
+                    and not PODPISEN_RED.search(l)]
+        sib_full, sib_short = sib(full), sib(short)
         if sib_full and sib_short:
             out.append(f"{fam}: пълно име и _1и3 в еднотипни редове "
                        f"({len(sib_full)} и {len(sib_short)} бр.)")
+    return out
+
+
+def stilovi_greshki(name, lines, doc):
+    """Проверки по стиловия стандарт, приет на 08.09.2026 върху двата еталона.
+
+    Правят се само за шаблоните, вече минали през стандарта. Останалите ще
+    влизат в списъка един по един, докато се преработват — иначе двайсет
+    непреработени файла заглушават сигнала.
+    """
+    if name not in STILOVI_SHABLONI:
+        return []
+    out = []
+
+    for s in doc.sections:
+        if any(p.text.strip() for p in s.header.paragraphs):
+            out.append("шаблонът има ХЕДЪР — стандартът е без")
+        if any(p.text.strip() for p in s.footer.paragraphs):
+            out.append("шаблонът има ФУТЪР — стандартът е без")
+
+    for line in lines:
+        if PRAVI_KAVICHKI.search(line):
+            out.append(f'прави кавички вместо „ “: …{line.strip()[:60]}…')
+        if BUKVALNA_CHERTA.search(line):
+            out.append(f"буквална черта | в текста: …{line.strip()[:60]}…")
+        # кратката форма в описателен ред — там се пише пълното име
+        if KRATKA_V_OPISATELEN.search(line) and not PODPISEN_RED.search(line):
+            out.append(f"кратка форма _1и3 в описателен ред: …{line.strip()[:70]}…")
+
+    # повторена буква в подписен блок
+    bukvi = [(BUKVA_V_PODPIS.match(l).group(1), l) for l in lines
+             if BUKVA_V_PODPIS.match(l) and PODPISEN_RED.search(l)]
+    for i in range(1, len(bukvi)):
+        if bukvi[i][0] == bukvi[i - 1][0]:
+            out.append(f"повторена буква „{bukvi[i][0]}.“ в подписен блок: "
+                       f"…{bukvi[i][1].strip()[:55]}…")
     return out
 
 
@@ -89,7 +151,8 @@ def main():
 
     for path in files:
         name  = os.path.basename(path)
-        lines = [l for l in all_text(Document(path))]
+        doc   = Document(path)
+        lines = [l for l in all_text(doc)]
         blob  = "\n".join(lines)
         found = set(MARKER.findall(blob))
         used |= found
@@ -107,6 +170,9 @@ def main():
 
         for msg in sibling_mismatch(lines):
             warnings.append((name, "РАЗНОБОЙ", msg))
+
+        for msg in stilovi_greshki(name, lines, doc):
+            errors.append((name, "СТИЛ", msg))
 
         for leg, why in LEGACY.items():
             if leg in blob:
