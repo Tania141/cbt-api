@@ -83,6 +83,18 @@ STILOVI_SHABLONI = {
     "Akt_11_Template.docx",
     "Akt_12_Template.docx",
     "template_akt14_1.docx",
+    # втора вълна — дългите, 08.09.2026
+    "Akt_13_Template.docx",
+    "Akt_15_Template.docx",
+    "Akt_16_Template.docx",
+    "Akt_9_Beton_Dnevnik_Template.docx",
+    "OSIP_Template.docx",
+    "Okonchatelen_Doklad_Template.docx",
+    "Protokol_17_Template.docx",
+    "Protokol_2a_Template.docx",
+    "Zapovedna_Template1.docx",
+    # Zapovedna_Template.docx НЕ влиза: албумен A4 на две колони с плаващ
+    # етикет за прошнуроване — минава се на ръка, не по общия стандарт
 }
 
 LEGACY = {
@@ -155,8 +167,11 @@ def stilovi_greshki(name, lines, doc):
         if TOCHKI_DO_MARKER.search(line):
             out.append(f"точки, залепени пред маркер — излизат заедно със "
                        f"стойността: …{line.strip()[:60]}…")
-        # кратката форма в описателен ред — там се пише пълното име
-        if KRATKA_V_OPISATELEN.search(line) and not PODPISEN_RED.search(line):
+        # кратката форма в описателен ред — там се пише пълното име.
+        # Изключение: редът „({{Нещо_1и3}})“ сам по себе си е името под
+        # подписната линия, която стои на предишния параграф.
+        if (KRATKA_V_OPISATELEN.search(line) and not PODPISEN_RED.search(line)
+                and not re.fullmatch(r"\s*\(\{\{[^}]+\}\}\)\s*", line)):
             out.append(f"кратка форма _1и3 в описателен ред: …{line.strip()[:70]}…")
 
     # повторена буква в подписен блок
