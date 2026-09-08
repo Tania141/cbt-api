@@ -97,6 +97,17 @@ STILOVI_SHABLONI = {
     "Zapovedna_Template.docx",
 }
 
+# Дългите документи, които се четат разлистени: там футърът НЕ е фирмен знак,
+# а съдържание — строежът и адресът на всяка страница. Изключение по решение
+# на оператора от 08.09.2026; при OSIP и Окончателния доклад това всъщност е
+# връщане на нещо, което преработката по стандарта беше отнела.
+S_TEKUSHT_FUTAR = {
+    "OSIP_Template.docx",
+    "Okonchatelen_Doklad_Template.docx",
+    "Akt_15_Template.docx",
+    "Akt_16_Template.docx",
+}
+
 LEGACY = {
     "Възложател_":               "правописен дублет с „а“ вместо „и“",
     "{{Кота_":                   "кирилски вариант на кота",
@@ -154,7 +165,8 @@ def stilovi_greshki(name, lines, doc):
     for s in doc.sections:
         if any(p.text.strip() for p in s.header.paragraphs):
             out.append("шаблонът има ХЕДЪР — стандартът е без")
-        if any(p.text.strip() for p in s.footer.paragraphs):
+        if (any(p.text.strip() for p in s.footer.paragraphs)
+                and name not in S_TEKUSHT_FUTAR):
             out.append("шаблонът има ФУТЪР — стандартът е без")
 
     for line in lines:
