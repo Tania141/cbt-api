@@ -567,12 +567,22 @@ def build_placeholders(d):
 # ── Template engine ───────────────────────────────────────────────────────────
 
 def insert_paragraphs_after(para, lines, font_name="Times New Roman", font_size=12):
-    from docx.shared import Pt
+    """Продълженията на многореден маркер — след носещия го параграф.
+
+    Наследяват и вида на параграфа, не само на рънa. Дотук се копираха само
+    свойствата на рънa (шрифт, размер), а параграфните — стил, междуредие,
+    отстъп — не: първият подписен ред излизаше по стил „Signature Line“, а
+    вторият и третият падаха на „Normal“. При три възложителя се виждаше
+    веднага (Акт 10, 08.09.2026).
+    """
     ref = para._element
     parent = ref.getparent()
     idx = list(parent).index(ref)
+    orig_ppr = ref.find(qn("w:pPr"))
     for i, line in enumerate(lines):
         new_p = OxmlElement("w:p")
+        if orig_ppr is not None:
+            new_p.append(deepcopy(orig_ppr))
         new_r = OxmlElement("w:r")
         new_rpr = OxmlElement("w:rPr")
         if para.runs:
