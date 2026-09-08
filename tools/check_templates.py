@@ -87,7 +87,6 @@ STILOVI_SHABLONI = {
     "Akt_13_Template.docx",
     "Akt_15_Template.docx",
     "Akt_16_Template.docx",
-    "Akt_9_Beton_Dnevnik_Template.docx",
     "OSIP_Template.docx",
     "Okonchatelen_Doklad_Template.docx",
     "Protokol_17_Template.docx",
