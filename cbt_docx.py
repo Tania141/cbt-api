@@ -13,6 +13,11 @@ from docx.oxml import OxmlElement
 
 _TITLES = {"инж", "арх", "проф", "д-р", "доц", "др"}
 
+# Празно поле за попълване на ръка. Точки, не долни черти — оцеляват при
+# копиране. Стои в кода, а не в шаблона, защото залепени за маркер точки
+# излизат заедно със стойността, когато тя е попълнена.
+_PRAZNO = "." * 100
+
 # Изписвания, които се срещат в паспортите, но не са правилни.
 # „др." се разпознава, за да не се брои за първо име, и се изписва като „д-р".
 _TITLE_FIX = {"др": "д-р"}
@@ -527,18 +532,20 @@ def build_placeholders(d):
         "{{ПЖ_Провод_1и3}}":              "; ".join(
             f"{one_and_three(with_title(p['title'], p['name']))} — част {p['specialization']}"
             for p in projectants if p.get("specialization") in _PROVOD_PARTS and p.get("name")),
-        "{{Вода}}":                      d.get("Вода", ""),
-        "{{Канализация}}":               d.get("Канализация", ""),
-        "{{Ел_Захранване}}":             d.get("Ел_Захранване", ""),
+        "{{Вода}}":                      d.get("Вода", "").strip() or _PRAZNO,
+        "{{Канализация}}":               d.get("Канализация", "").strip() or _PRAZNO,
+        "{{Ел_Захранване}}":             d.get("Ел_Захранване", "").strip() or _PRAZNO,
         "{{Проектанти_Списък}}":         build_projectants_list(projectants),
         "{{Проектанти_Имена}}":          build_projectants_names(projectants),
         "{{Консултанти_Списък}}":        build_employees_list(employees),
         "{{Проектанти_Подписи}}":        build_projectants_signatures(projectants),
         "{{Консултанти_Подписи}}":       build_employees_signatures(employees),
-        "{{Opisanie_Ploshtadka}}":       d.get("Opisanie_Ploshtadka", ""),
+        # Празното поле идва от кода, не от шаблона: точки, залепени за маркер,
+        # излизат ЗАЕДНО със стойността, когато тя е попълнена (08.09.2026).
+        "{{Opisanie_Ploshtadka}}":       d.get("Opisanie_Ploshtadka", "").strip() or _PRAZNO,
         "{{Sastoyanie_Okolo}}":          d.get("Sastoyanie_Okolo", "пътните и тротоарни настилки по прилежащата улица са в добро състояние, съседните имоти няма да бъдат засягани от бъдещото строителство"),
         "{{Merki_PBZ}}":                 d.get("Merki_PBZ", "ще се осъществява от прилежащата улична мрежа съгласно съгласуван ПБЗ"),
-        "{{Darvesenost}}":               d.get("Darvesenost", ""),
+        "{{Darvesenost}}":               d.get("Darvesenost", "").strip() or _PRAZNO,
         "{{Kota_Izkop}}":               d.get("Kota_Izkop", ""),
         "{{Kota_Cokul}}":               _normalize_cokul(d.get("Kota_Cokul", "")),
         "{{Kota_Korniz}}":              d.get("Kota_Korniz", ""),
