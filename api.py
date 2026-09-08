@@ -205,6 +205,35 @@ def init_db():
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            # ── Регистър на заповедните книги ─────────────────────────────
+            # Номерът на заповедната книга е официален и последователен за
+            # фирмата. Дотук се въвеждаше само в паспорта на обекта и никъде
+            # не се виждаше кой номер къде е отишъл — оттам дублирани и
+            # пропуснати номера.
+            #
+            # Редът може да е БЕЗ обект: стари книги отпреди системата,
+            # номер, даден преди да е заведен паспортът, анулирана книга.
+            # Затова `pi` е незадължителен, а `obekt` е свободен текст.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS zapovedni_knigi (
+                    id          SERIAL PRIMARY KEY,
+                    tenant_id   TEXT NOT NULL,
+                    nomer       INTEGER NOT NULL,
+                    data        TEXT,
+                    pi          TEXT,
+                    obekt       TEXT,
+                    status      TEXT NOT NULL DEFAULT 'издадена',
+                    sledvashta  INTEGER,
+                    belejka     TEXT,
+                    created_at  TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE (tenant_id, nomer)
+                )
+            """)
+            # Началният номер: регистърът не почва от нулата, а оттам,
+            # докъдето фирмата е стигнала на хартия.
+            cur.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "
+                        "zk_nachalen_nomer INTEGER")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS login_attempts (
                     id         SERIAL PRIMARY KEY,
@@ -1054,6 +1083,193 @@ def generate_document(doc_type):
                         "hint": f"Постави шаблона в папка: {LOCAL_TEMPLATES_DIR}"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Регистър на заповедните книги ────────────────────────────────────────────
+# Номерът е официален и последователен за фирмата: книгата се заверява и
+# прономерова, и надзорът трябва да може да проследи кой номер на кой обект е
+# даден. Регистърът пази и връзката „тази книга е заменена от онази“ — при
+# смяна на надзора се издава нова книга и документите след това трябва да се
+# позовават на нея, не на старата.
+
+ZK_STATUSI = ("издадена", "заменена", "анулирана")
+
+
+def _zk_nachalen(cur, tenant_id):
+    cur.execute("SELECT zk_nachalen_nomer FROM tenants WHERE id::text = %s",
+                (str(tenant_id),))
+    r = cur.fetchone()
+    return (r or {}).get("zk_nachalen_nomer")
+
+
+def _zk_sledvasht(redove, nachalen):
+    """Следващият свободен номер.
+
+    Не е просто най-големият + 1: регистърът тръгва оттам, докъдето фирмата е
+    стигнала на хартия. Празен регистър с начален номер 4568 дава 4568.
+    """
+    nomera = [r["nomer"] for r in redove]
+    if not nomera:
+        return nachalen
+    sledvasht = max(nomera) + 1
+    return max(sledvasht, nachalen) if nachalen else sledvasht
+
+
+@app.route("/api/zk", methods=["GET"])
+@require_auth
+def zk_registar():
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е конфигурирана"}), 503
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, nomer, data, pi, obekt, status, sledvashta, belejka "
+                "FROM zapovedni_knigi WHERE tenant_id = %s ORDER BY nomer",
+                (str(tenant_id),))
+            redove = [dict(r) for r in cur.fetchall()]
+            nachalen = _zk_nachalen(cur, tenant_id)
+    finally:
+        conn.close()
+
+    # Празнините се показват, но не се запълват автоматично: една пропусната
+    # книга обикновено значи, че не е вписана, а не че номерът е свободен.
+    nomera = sorted(r["nomer"] for r in redove)
+    prazniny = []
+    if nomera:
+        dolna = nachalen if nachalen else nomera[0]
+        prazniny = [n for n in range(dolna, nomera[-1]) if n not in set(nomera)]
+
+    return jsonify({"redove": redove,
+                    "nachalen": nachalen,
+                    "sledvasht": _zk_sledvasht(redove, nachalen),
+                    "prazniny": prazniny})
+
+
+@app.route("/api/zk", methods=["POST"])
+@require_auth
+def zk_zapishi():
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
+    body = request.get_json() or {}
+    try:
+        nomer = int(str(body.get("nomer", "")).strip())
+    except ValueError:
+        return jsonify({"error": "Номерът трябва да е цяло число"}), 400
+    status = (body.get("status") or "издадена").strip()
+    if status not in ZK_STATUSI:
+        return jsonify({"error": f"Непознат статус: {status}. "
+                                 f"Позволени: {', '.join(ZK_STATUSI)}"}), 400
+    sledvashta = body.get("sledvashta")
+    sledvashta = int(sledvashta) if str(sledvashta or "").strip().isdigit() else None
+    if sledvashta == nomer:
+        return jsonify({"error": "Книгата не може да сочи към себе си"}), 400
+
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е конфигурирана"}), 503
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO zapovedni_knigi
+                        (tenant_id, nomer, data, pi, obekt, status, sledvashta, belejka)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (tenant_id, nomer) DO UPDATE SET
+                        data = EXCLUDED.data, pi = EXCLUDED.pi,
+                        obekt = EXCLUDED.obekt, status = EXCLUDED.status,
+                        sledvashta = EXCLUDED.sledvashta,
+                        belejka = EXCLUDED.belejka, updated_at = NOW()
+                    RETURNING id, nomer, data, pi, obekt, status, sledvashta, belejka
+                """, (str(tenant_id), nomer,
+                      (body.get("data") or "").strip() or None,
+                      (body.get("pi") or "").strip() or None,
+                      (body.get("obekt") or "").strip() or None,
+                      status, sledvashta,
+                      (body.get("belejka") or "").strip() or None))
+                red = dict(cur.fetchone())
+    finally:
+        conn.close()
+    log_action("zk_zapis", user_id=request.current_user["sub"], tenant_id=tenant_id,
+               detail={"nomer": nomer, "status": status})
+    return jsonify(red)
+
+
+@app.route("/api/zk/nachalen", methods=["POST"])
+@require_auth
+def zk_nachalen_nomer():
+    """Откъде тръгва регистърът — примерно 4568, ако дотам е стигнала хартията."""
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
+    try:
+        nachalen = int(str((request.get_json() or {}).get("nachalen", "")).strip())
+    except ValueError:
+        return jsonify({"error": "Началният номер трябва да е цяло число"}), 400
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е конфигурирана"}), 503
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE tenants SET zk_nachalen_nomer = %s "
+                            "WHERE id::text = %s", (nachalen, str(tenant_id)))
+    finally:
+        conn.close()
+    log_action("zk_nachalen", user_id=request.current_user["sub"], tenant_id=tenant_id,
+               detail={"nachalen": nachalen})
+    return jsonify({"nachalen": nachalen})
+
+
+@app.route("/api/zk/proverka", methods=["GET"])
+@require_auth
+def zk_proverka():
+    """Свети ли червено за тази заповедна книга.
+
+    Вика се, когато се съставя документ, който се позовава на ЗК. Ако книгата
+    е заменена или анулирана, номерът в паспорта вече не е верният.
+    """
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
+    try:
+        nomer = int(str(request.args.get("nomer", "")).strip())
+    except ValueError:
+        return jsonify({"cherveno": False, "sabshtenie": ""})
+
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е конфигурирана"}), 503
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT nomer, data, obekt, status, sledvashta, belejka "
+                        "FROM zapovedni_knigi WHERE tenant_id = %s AND nomer = %s",
+                        (str(tenant_id), nomer))
+            red = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not red:
+        return jsonify({"cherveno": False, "vpisana": False, "sabshtenie":
+                        f"Заповедна книга № {nomer} не е вписана в регистъра."})
+    red = dict(red)
+    if red["status"] == "заменена":
+        sled = red["sledvashta"]
+        return jsonify({"cherveno": True, "vpisana": True, "red": red,
+                        "sabshtenie": f"Заповедна книга № {nomer} е ЗАМЕНЕНА"
+                                      + (f" от № {sled}" if sled else "")
+                                      + ". Документите след смяната се позовават на новата."})
+    if red["status"] == "анулирана":
+        return jsonify({"cherveno": True, "vpisana": True, "red": red,
+                        "sabshtenie": f"Заповедна книга № {nomer} е АНУЛИРАНА."})
+    if red["belejka"]:
+        return jsonify({"cherveno": True, "vpisana": True, "red": red,
+                        "sabshtenie": f"Заповедна книга № {nomer}: {red['belejka']}"})
+    return jsonify({"cherveno": False, "vpisana": True, "red": red, "sabshtenie": ""})
 
 
 # ── Cloud Sync ────────────────────────────────────────────────────────────────
