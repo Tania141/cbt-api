@@ -92,8 +92,9 @@ STILOVI_SHABLONI = {
     "Protokol_17_Template.docx",
     "Protokol_2a_Template.docx",
     "Zapovedna_Template1.docx",
-    # Zapovedna_Template.docx НЕ влиза: албумен A4 на две колони с плаващ
-    # етикет за прошнуроване — минава се на ръка, не по общия стандарт
+    # Заповедната книга мина на ръка (08.09.2026): книжен сгъв вместо две
+    # колони, осем A5 страници в четивен ред. Виж КОНВЕНЦИЯ.md → Книжно тяло.
+    "Zapovedna_Template.docx",
 }
 
 LEGACY = {
