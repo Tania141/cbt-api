@@ -126,17 +126,33 @@ def _single_vazlogitel_line(v):
     return ", ".join(parts)
 
 
+def _podpisvasht(v):
+    """Кой се подписва за този възложител.
+
+    Изрично посоченият подписващ има превес. Ако няма такъв, подписва се самото
+    лице: физическото — само, юридическото — чрез представителя си. Преди
+    08.09.2026 липсата на изрично посочен оставяше подписния ред без име, макар
+    че при физическо лице подписващият е очевиден.
+    """
+    if v.get("podpisva"):
+        return with_title(v.get("podpisva_title"), v["podpisva"])
+    if v["tip"] in ("Физическо лице", "ФЛ"):
+        return with_title(v.get("firma_title"), v["firma"])
+    return with_title(v.get("pred_title"), _clean_pred(v.get("pred", "")))
+
+
 def build_vazlogitel_block(d):
     """
-    ГОРЕ блок ({{Възложител_Блок}}): номериран списък 1..N.
-    Ако Възложители_Брой липсва → стар единичен път (обратна съвместимост).
+    ГОРЕ блок ({{Възложител_Блок}}): възложителите на един ред, през „; “.
+
+    Това е полето „Възложител“ в главата на всеки акт и протокол. Еднореден е
+    по решение на оператора от 08.09.2026: главата трябва да остане компактна
+    и при десет съсобственика, за да не избута надолу самото заглавие на акта.
+    Поименното изброяване е в подписите и в списъка на участниците.
     """
     vazlogiteli = extract_vazlogiteli(d)
     if vazlogiteli:
-        if len(vazlogiteli) == 1:
-            return _single_vazlogitel_line(vazlogiteli[0])
-        lines = [f"{i+1}. {_single_vazlogitel_line(v)}" for i, v in enumerate(vazlogiteli)]
-        return "\n".join(lines)
+        return "; ".join(_single_vazlogitel_line(v) for v in vazlogiteli)
 
     # ── стар единичен път (обратна съвместимост) ──────────────────────────────
     tip   = d.get("Възложител_Тип", "Фирма")
@@ -169,8 +185,14 @@ def build_vazlogitel_podpisva_block(d):
             return with_title(v.get("podpisva_title"), v["podpisva"]) or _single_vazlogitel_line(v)
         lines = []
         for i, v in enumerate(signers):
-            podp = with_title(v.get("podpisva_title"), v["podpisva"]) or "………"
-            lines.append(f"{i+1}. {_single_vazlogitel_line(v)} — подписва: {podp}")
+            red = _single_vazlogitel_line(v)
+            # „— подписва: X“ се дописва само когато X не личи вече от реда:
+            # при физическо лице, което се подписва само, и при дружество,
+            # чийто представител вече е изписан, добавката е шум.
+            podp = _podpisvasht(v)
+            if podp and podp not in red:
+                red += f" — подписва: {podp}"
+            lines.append(f"{i+1}. {red}")
         return "\n".join(lines)
 
     # ── стар единичен път (обратна съвместимост) ──────────────────────────────
@@ -196,10 +218,7 @@ def _podpisni_redove(d, prefix):
         signers = [v for v in vazlogiteli if v["signs"]]
         if not signers:                       # никой избран → празен ред за подпис
             return line("")
-        return "\n".join(
-            line(with_title(v.get("podpisva_title"), one_and_three(v["podpisva"])) if v["podpisva"] else "")
-            for v in signers
-        )
+        return "\n".join(line(one_and_three(_podpisvasht(v))) for v in signers)
 
     # ── стар единичен път ──────────────────────────────────────────────────────
     vaz_podpisva = d.get("Възложател_Подписва", "")
