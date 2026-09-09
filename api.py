@@ -957,6 +957,55 @@ def get_passport(pi):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def _ot_pasporta(passport, *kliuchove):
+    """Стойност от паспорта, независимо коя от двете форми е дошла.
+
+    Единият път в PWA праща самия обект на проекта (речник с `zk`, `stroej`…),
+    другият — списък от двойки [ключ, стойност]. Затова четенето е на едно
+    място, а не разпръснато из endpoint-ите.
+
+    `kliuchove` са алтернативни имена: ("zk.number", "ЗК_Номер").
+    """
+    for kl in kliuchove:
+        if isinstance(passport, dict):
+            stoynost = passport
+            for parche in kl.split("."):
+                stoynost = (stoynost or {}).get(parche) if isinstance(stoynost, dict) else None
+            if str(stoynost or "").strip():
+                return str(stoynost).strip()
+        elif isinstance(passport, list):
+            for red in passport:
+                if (isinstance(red, (list, tuple)) and len(red) >= 2
+                        and str(red[0]).strip() == kl and str(red[1] or "").strip()):
+                    return str(red[1]).strip()
+    return ""
+
+
+def _vpishi_zk_ot_pasport(cur, tenant_id, pi, passport):
+    """Номерът от паспорта влиза и в регистъра — веднъж, без да го презаписва.
+
+    Дотук операторът вписваше номера два пъти: веднъж в паспорта и веднъж в
+    регистъра. `DO NOTHING` е нарочно: ако редът вече съществува, той може да
+    носи ръчно сложен статус („заменена“) и не бива да се връща на „издадена“.
+    """
+    nomer = _ot_pasporta(passport, "zk.number", "ЗК_Номер")
+    if not nomer.isdigit():
+        return None
+    stroej = _ot_pasporta(passport, "stroej", "Строеж")
+    adres = _ot_pasporta(passport, "address", "Адрес")
+    obekt = ", ".join(x for x in (stroej, adres) if x)
+    cur.execute("""
+        INSERT INTO zapovedni_knigi (tenant_id, nomer, data, pi, obekt, status)
+        VALUES (%s, %s, %s, %s, %s, 'издадена')
+        ON CONFLICT (tenant_id, nomer) DO NOTHING
+        RETURNING nomer
+    """, (str(tenant_id), int(nomer),
+          _ot_pasporta(passport, "zk.date", "ЗК_Дата") or None,
+          pi, obekt or None))
+    red = cur.fetchone()
+    return int(nomer) if red else None
+
+
 @app.route("/api/passports/<pi>", methods=["POST"])
 @require_auth
 def save_passport(pi):
@@ -984,10 +1033,12 @@ def save_passport(pi):
                             consultant = EXCLUDED.consultant, passport = EXCLUDED.passport,
                             updated_at = NOW()
                 """, (pi, str(tenant_id), stroej, address, consultant, json.dumps(passport)))
+                vpisan_zk = _vpishi_zk_ot_pasport(cur, tenant_id, pi, passport)
         conn.close()
         log_action("save_passport", user_id=request.current_user["sub"], tenant_id=tenant_id,
-                   detail={"pi": pi})
-        return jsonify({"status": "ok", "pi": pi, "tenant_id": tenant_id})
+                   detail={"pi": pi, "zk_vpisana": vpisan_zk})
+        return jsonify({"status": "ok", "pi": pi, "tenant_id": tenant_id,
+                        "zk_vpisana": vpisan_zk})
     except Exception as e:
         import traceback
         return jsonify({"error": str(e), "type": type(e).__name__,
