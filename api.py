@@ -497,15 +497,30 @@ def _izvori_kratko():
         from rules import normativna_matrica as nm
         from rules import cheklist_dokumenti as chd
         from rules import citati as ct
-        nalice, lipsvat = [], []
-        proveri = [("Наредба № 1", n1.path()),
-                   ("Наредба № 7", n7.MIRROR if os.path.isfile(n7.MIRROR) else None),
-                   ("нормативна матрица", nm.path()),
-                   ("чеклист документи", chd.path())]
-        proveri += [(f"цитати · {k}", ct.path(k)) for k in ct.IZTOCHNICI]
-        for ime, p in proveri:
-            (nalice if p else lipsvat).append(ime)
-        return {"namereni": len(nalice), "ot": len(proveri), "lipsvat": lipsvat}
+        def n1_ok():
+            nov, err = n1.otpechatak()
+            return not err and not n1.razliki(nov, n1._lock())
+
+        # Намерен не значи годен: файл, който не съвпада с отпечатъка, се
+        # намира прекрасно и въпреки това правилата отказват да работят.
+        # Затова двете състояния се броят поотделно.
+        proveri = [("Наредба № 1", n1.path(), n1_ok),
+                   ("Наредба № 7", n7.MIRROR if os.path.isfile(n7.MIRROR) else None,
+                    lambda: n7.zakliuchena()[0]),
+                   ("нормативна матрица", nm.path(), lambda: nm.zaklyucheno()[0]),
+                   ("чеклист документи", chd.path(), lambda: chd.zaklyucheno()[0])]
+        proveri += [(f"цитати · {k}", ct.path(k), lambda: ct.zaklyucheno()[0])
+                    for k in ct.IZTOCHNICI]
+
+        lipsvat, ne_savpadat = [], []
+        for ime, p, zakl in proveri:
+            if not p:
+                lipsvat.append(ime)
+            elif not zakl():
+                ne_savpadat.append(ime)
+        return {"namereni": len(proveri) - len(lipsvat), "ot": len(proveri),
+                "lipsvat": lipsvat, "ne_savpadat": ne_savpadat,
+                "godni": len(proveri) - len(lipsvat) - len(ne_savpadat)}
     except Exception as e:                       # диагностиката не бива да вали /health
         return {"greshka": str(e)}
 

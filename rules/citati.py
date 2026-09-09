@@ -66,7 +66,11 @@ def otpechatak():
         p = path(kod)
         if not p:
             continue
-        raw = open(p, "rb").read()
+        # Краят на реда не е съдържание. Windows дава CRLF, git на Linux дава
+        # LF — ако отпечатъкът виси на това, източникът се „променя“ при
+        # деплой, без нито една дума да е различна. Другите четци четат
+        # текстово и затова не пострадаха; този четеше байтово.
+        raw = open(p, "rb").read().replace(b"\r\n", b"\n")
         izhod[kod] = {"fajl": os.path.basename(p),
                       "sha256": hashlib.sha256(raw).hexdigest(),
                       "chlenove": len(re.findall(r"Чл\.\s*\d+", raw.decode("utf-8")))}
