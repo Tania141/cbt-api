@@ -1734,16 +1734,21 @@ def ai_kategoria_smisyl():
     from rules.kategoria import cheti_citat
     from rules.naredba1 import Naredba
 
+    # „Не мога“ има два различни вида и те не бива да си приличат на екрана:
+    # „citat“ значи, че нещо в текста на оператора куца — това е находка и се
+    # пази. „sistemna“ значи, че самият инструмент е повреден (липсва наредба,
+    # не съвпада отпечатък) — това не е находка за строежа и не бива да остава
+    # записано в паспорта, защото после изглежда като присъда.
     d = cheti_citat(citat)
     if "chl" not in d:
-        return jsonify({"status": "ne_moga",
+        return jsonify({"status": "ne_moga", "vid": "citat",
                         "obosnovka": "В цитата не се разчита член и алинея от Наредба № 1."})
     n = Naredba()
     if not n.ok:
-        return jsonify({"status": "ne_moga", "obosnovka": n.prichina})
+        return jsonify({"status": "ne_moga", "vid": "sistemna", "obosnovka": n.prichina})
     r, err = n.razporedba(d["chl"], d["al"], d.get("t"))
     if err:
-        return jsonify({"status": "ne_moga", "obosnovka": err})
+        return jsonify({"status": "ne_moga", "vid": "citat", "obosnovka": err})
 
     razporedba = r["zaglavie"] + (("\n" + r["tochka"]) if r["tochka"] else "")
     kade = f"чл. {d['chl']}, ал. {d['al']}" + (f", т. {d['t']}" if "t" in d else "")
@@ -1803,6 +1808,11 @@ def ai_kategoria_smisyl():
             "kade": kade,
             "razporedba": razporedba,
             "opisanie": opisanie,
+            # Кога и върху какво е проверено. Без това записаната присъда се
+            # показва вечно и изглежда като че ли важи за текста на екрана,
+            # дори операторът да е сменил цитата след нея.
+            "proveren_na": datetime.utcnow().isoformat(timespec="seconds"),
+            "citat": citat,
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
         })
