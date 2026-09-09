@@ -485,6 +485,31 @@ def require_admin(f):
         return f(*args, **kwargs)
     return wrapper
 
+def _izvori_kratko():
+    """Кратко състояние на заключените източници — за /health.
+
+    Подробностите (папка, отпечатък) са в GET /api/izvori. Тук стои само
+    кое липсва, защото това е въпросът, който се задава пръв.
+    """
+    try:
+        from rules import naredba1 as n1
+        from rules import naredba7 as n7
+        from rules import normativna_matrica as nm
+        from rules import cheklist_dokumenti as chd
+        from rules import citati as ct
+        nalice, lipsvat = [], []
+        proveri = [("Наредба № 1", n1.path()),
+                   ("Наредба № 7", n7.MIRROR if os.path.isfile(n7.MIRROR) else None),
+                   ("нормативна матрица", nm.path()),
+                   ("чеклист документи", chd.path())]
+        proveri += [(f"цитати · {k}", ct.path(k)) for k in ct.IZTOCHNICI]
+        for ime, p in proveri:
+            (nalice if p else lipsvat).append(ime)
+        return {"namereni": len(nalice), "ot": len(proveri), "lipsvat": lipsvat}
+    except Exception as e:                       # диагностиката не бива да вали /health
+        return {"greshka": str(e)}
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/health", methods=["GET"])
 def health():
@@ -520,7 +545,13 @@ def health():
         "templates": templates,
         "ai": "конфигуриран" if ANTHROPIC_API_KEY else "не е конфигуриран",
         "database": "свързан" if db_ok else ("не е конфигуриран" if not DATABASE_URL else f"грешка: {db_error}"),
-        "build": "10af59c",
+        # Ръчно вписаният комит остаряваше мълчаливо и твърдеше, че сървърът
+        # върви на код отпреди седмици. Railway подава истинския при всеки деплой.
+        "build": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7] or "неизвестен",
+        # Заключените източници влизат тук, защото /health е мястото, където се
+        # гледа „какво вижда сървърът“ — а точно това не се виждаше, когато
+        # наредбите останаха на локалната машина.
+        "izvori": _izvori_kratko(),
     })
 
 @app.route("/api/auth/register", methods=["POST"])
