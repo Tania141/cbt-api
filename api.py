@@ -1136,6 +1136,47 @@ def generate_document(doc_type):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/izvori", methods=["GET"])
+@require_auth
+def izvori_sastoyanie():
+    """Кои заключени източници вижда СЪРВЪРЪТ и откъде.
+
+    Съществува заради една конкретна грешка: наредбите се четат от папка на
+    локалната машина, която не е в git. Локално всичко минаваше, на Railway
+    четците мълчаха — „Наредба № 1 не е намерена до хранилището“. Локален
+    успех не доказва нищо за сървъра, затова отговорът трябва да идва оттам.
+    """
+    import os as _os
+    from rules import naredba1 as n1
+    from rules import naredba7 as n7
+    from rules import normativna_matrica as nm
+    from rules import cheklist_dokumenti as chd
+    from rules import citati as ct
+
+    def red(ime, p, zakl):
+        return {"iztochnik": ime,
+                "namereno": bool(p),
+                "fajl": _os.path.basename(p) if p else None,
+                "papka": _os.path.dirname(p) if p else None,
+                "zaklyucheno": zakl}
+
+    def n1_zaklyuchena():
+        nov, err = n1.otpechatak()
+        return not err and not n1.razliki(nov, n1._lock())
+
+    izhod = [
+        red("Наредба № 1", n1.path(), n1_zaklyuchena()),
+        red("Наредба № 7", n7.MIRROR if _os.path.isfile(n7.MIRROR) else None,
+            n7.zakliuchena()[0]),
+        red("нормативна матрица", nm.path(), nm.zaklyucheno()[0]),
+        red("чеклист документи", chd.path(), chd.zaklyucheno()[0]),
+    ] + [red(f"цитати · {k}", ct.path(k), ct.zaklyucheno()[0]) for k in ct.IZTOCHNICI]
+
+    lipsvat = [r["iztochnik"] for r in izhod if not r["namereno"]]
+    return jsonify({"izvori": izhod, "lipsvat": lipsvat,
+                    "vsichki_nalice": not lipsvat})
+
+
 @app.route("/api/cheklist", methods=["POST"])
 @require_auth
 def cheklist_dokumenti():
