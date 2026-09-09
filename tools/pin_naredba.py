@@ -20,6 +20,39 @@ sys.path.insert(0, ROOT)
 
 from rules import naredba1 as n1  # noqa: E402
 from rules import naredba7 as n7  # noqa: E402
+from rules import normativna_matrica as nm  # noqa: E402
+
+
+def matrica(pin):
+    """Сверява нормативната матрица — общите актове и групите по вид строеж."""
+    print()
+    print("═" * 60)
+    print("НОРМАТИВНА МАТРИЦА — приложими актове по вид строеж")
+
+    if not nm.path():
+        print("✗ справочникът не е намерен")
+        return 1
+    nov = nm.otpechatak()
+    print(f"файл:   {nov['fajl']}")
+    print(f"sha256: {nov['sha256'][:16]}…")
+    print(f"общи актове: {nov['obshti']} · групи по вид строеж: {nov['grupi']}")
+
+    ok, prichina = nm.zaklyucheno()
+    if ok:
+        print()
+        print("✅ Матрицата съвпада със заключения отпечатък.")
+        return 0
+
+    print()
+    print(f"⚠️ {prichina}")
+    if pin:
+        json.dump(nov, open(nm.LOCK, "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=2)
+        print(f"✅ Записан нов отпечатък: {os.path.basename(nm.LOCK)}")
+        return 0
+    print("Списъкът с нормативни документи няма да се предлага, докато не се сверят.")
+    print("Ако промяната е очаквана: python tools/pin_naredba.py --pin")
+    return 1
 
 
 def naredba7(pin):
@@ -98,7 +131,8 @@ def main():
     print()
     if not r:
         print("✅ Наредба № 1 съвпада със заключения отпечатък.")
-        return naredba7("--pin" in sys.argv)
+        kod = naredba7("--pin" in sys.argv)
+        return matrica("--pin" in sys.argv) or kod
 
     print("⚠️ Разлики спрямо заключеното:")
     for x in r:
