@@ -411,7 +411,8 @@ def _tekst_pup(priznaci):
     kadastr = str(priznaci.get("kadastr", "")).strip()
     if kadastr:
         tekst += f", и с кадастралната карта, одобрена със {kadastr}"
-    return tekst + "."
+    # Стойностите от паспорта обикновено свършват с „г.“ — да не става „г..“
+    return tekst if tekst.endswith(".") else tekst + "."
 
 
 def otgovor(tochka, priznaci):
