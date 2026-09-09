@@ -988,6 +988,13 @@ def list_passports():
 @app.route("/api/passports/<pi>", methods=["GET"])
 @require_auth
 def get_passport(pi):
+    """НАСЛЕДЕН път: чете паспорт от passport.xlsx в Dropbox.
+
+    PWA вече не го вика — записът и списъкът минават през Postgres. Оставен е
+    съзнателно още една итерация: ако се окаже, че стар паспорт живее само в
+    Dropbox, това е единственият начин да се прочете. Да се махне, когато се
+    потвърди, че такива няма.
+    """
     tenant_id = request.current_user.get("tenant_id")
     if not tenant_id:
         return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
