@@ -1136,6 +1136,48 @@ def generate_document(doc_type):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/cheklist", methods=["POST"])
+@require_auth
+def cheklist_dokumenti():
+    """Кои входни документи се изискват за този обект и кои липсват.
+
+    Списъкът и условията за приложимост идват от чеклиста на оператора, не от
+    кода — виж rules/cheklist_dokumenti.py.
+    """
+    from rules import cheklist_dokumenti as chd
+
+    body = request.get_json() or {}
+    d = rows_to_dict(body.get("passport", []))
+
+    def da(v):
+        return str(v).strip().lower() in ("да", "true", "1", "yes")
+
+    vid_kam_dumi = {"sgrada": "сграда", "lineen": "линеен",
+                    "lineen_ktp": "линеен", "saorajenie": "съоръжение"}
+    priznaci = {
+        "категория":       str(d.get("Категория", "")).strip()[:1],
+        "предназначение":  d.get("Предназначение", "").strip() or "жилищна",
+        "вид":             vid_kam_dumi.get(d.get("Вид", "sgrada"), "сграда"),
+        "паметник":        da(d.get("Паметник", "")),
+        "защитена_зона":   da(d.get("Защитена_Зона", "")),
+        "опасни_вещества": da(d.get("Опасни_Вещества", "")),
+        "спо":             bool(str(d.get("СПО", "")).strip()),
+        "води":            da(d.get("Води", "")),
+        "преработка":      d.get("Повод", "").strip() == "преработка_154",
+    }
+
+    n = int(d.get("Документи_Брой", 0) or 0)
+    nalichni = [{"dokument": d.get(f"Документ_{i}_Име", ""),
+                 "nomer": d.get(f"Документ_{i}_Номер", "")}
+                for i in range(1, n + 1) if d.get(f"Документ_{i}_Име", "")]
+
+    rezultat = chd.spisak(priznaci, nalichni)
+    log_action("cheklist", user_id=request.current_user["sub"],
+               tenant_id=request.current_user.get("tenant_id"),
+               detail={"lipsvat": rezultat.get("lipsvat")})
+    return jsonify({**rezultat, "priznaci": priznaci})
+
+
 # ── Регистър на заповедните книги ────────────────────────────────────────────
 # Номерът е официален и последователен за фирмата: книгата се заверява и
 # прономерова, и надзорът трябва да може да проследи кой номер на кой обект е

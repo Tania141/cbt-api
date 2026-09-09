@@ -21,6 +21,38 @@ sys.path.insert(0, ROOT)
 from rules import naredba1 as n1  # noqa: E402
 from rules import naredba7 as n7  # noqa: E402
 from rules import normativna_matrica as nm  # noqa: E402
+from rules import cheklist_dokumenti as chd  # noqa: E402
+
+
+def cheklist(pin):
+    """Сверява чеклиста на входните документи."""
+    print()
+    print("═" * 60)
+    print("ЧЕКЛИСТ — входни документи и съгласувания")
+
+    if not chd.path():
+        print("✗ чеклистът не е намерен")
+        return 1
+    nov = chd.otpechatak()
+    print(f"файл:   {nov['fajl']}")
+    print(f"sha256: {nov['sha256'][:16]}…")
+    print(f"документи: {nov['dokumenti']} в {len(nov['razdeli'])} раздела")
+
+    ok, prichina = chd.zaklyucheno()
+    if ok:
+        print()
+        print("✅ Чеклистът съвпада със заключения отпечатък.")
+        return 0
+
+    print()
+    print(f"⚠️ {prichina}")
+    if pin:
+        json.dump(nov, open(chd.LOCK, "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=2)
+        print(f"✅ Записан нов отпечатък: {os.path.basename(chd.LOCK)}")
+        return 0
+    print("Проверката на документите няма да работи, докато не се сверят.")
+    return 1
 
 
 def matrica(pin):
@@ -131,8 +163,10 @@ def main():
     print()
     if not r:
         print("✅ Наредба № 1 съвпада със заключения отпечатък.")
-        kod = naredba7("--pin" in sys.argv)
-        return matrica("--pin" in sys.argv) or kod
+        pin = "--pin" in sys.argv
+        kod = naredba7(pin)
+        kod = matrica(pin) or kod
+        return cheklist(pin) or kod
 
     print("⚠️ Разлики спрямо заключеното:")
     for x in r:
