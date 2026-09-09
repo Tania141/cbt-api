@@ -445,8 +445,14 @@ def build_placeholders(d):
             "{{Възложител_Адрес}}":        _vl[0]["adres"],
             "{{Възложител_Представител}}": with_title(_vl[0]["pred_title"], _clean_pred(_vl[0]["pred"])),
         } if (_vl := extract_vazlogiteli(d)) else {}),
-        "{{Възложител_2имена}}":         two_names(vaz_name_for_1i3),
-        "{{Възложител_1и3}}":           one_and_three(vaz_name_for_1i3),
+        # Ръчно поправеното в PWA има превес над сметнатото.
+        # Полето „Подпис (2 имена — автоматично)“ съществува точно затова:
+        # съкращаването не винаги улучва (съставни имена, „Ана-Мария“), а
+        # дотук (09.09.2026) въведеното се изхвърляше мълчаливо.
+        "{{Възложител_2имена}}":         (d.get("Възложител_2имена","").strip()
+                                          or two_names(vaz_name_for_1i3)),
+        "{{Възложител_1и3}}":            (d.get("Възложител_1и3","").strip()
+                                          or one_and_three(vaz_name_for_1i3)),
         "{{Възложител_Блок}}":           build_vazlogitel_block(d),          # и (correct)
         "{{Възложател_Блок}}":           build_vazlogitel_block(d),          # а (legacy alias)
         "{{Възложител_Подписва_Блок}}":  build_vazlogitel_podpisva_block(d), # и
