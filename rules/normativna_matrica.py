@@ -27,9 +27,12 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_DIR)
 LOCK = os.path.join(_DIR, "normativna_matrica.lock.json")
 
+# Първо папката на оператора — за да печели това, което тя току-що е поправила.
+# После копието в хранилището: то е единственото, което стига до Railway.
 _TARSI = [
     os.path.join(os.path.dirname(_ROOT), "Закони инаредби"),
     os.path.join(os.path.dirname(_ROOT), "Закони и наредби"),
+    os.path.join(_DIR, "izvori"),
     _ROOT,
 ]
 

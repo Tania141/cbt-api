@@ -30,9 +30,12 @@ _ROOT = os.path.dirname(_DIR)
 LOCK = os.path.join(_DIR, "naredba1.lock.json")
 
 # Наредбата стои до хранилището, в C:\project\Закони инаредби
+# Първо папката на оператора — за да печели това, което тя току-що е поправила.
+# После копието в хранилището: то е единственото, което стига до Railway.
 _TARSI = [
     os.path.join(os.path.dirname(_ROOT), "Закони инаредби"),
     os.path.join(os.path.dirname(_ROOT), "Закони и наредби"),
+    os.path.join(_DIR, "izvori"),
     _ROOT,
 ]
 

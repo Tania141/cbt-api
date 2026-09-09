@@ -23,6 +23,26 @@ from rules import naredba7 as n7  # noqa: E402
 from rules import normativna_matrica as nm  # noqa: E402
 from rules import cheklist_dokumenti as chd  # noqa: E402
 
+IZVORI = os.path.join(ROOT, "rules", "izvori")
+
+
+def kopirai(p):
+    """Обновява копието в хранилището — то е единственото, което стига до Railway.
+
+    Локално правилата четат папката на оператора; на сървъра нея я няма. Ако
+    копието изостане, сървърът мълчаливо работи по стара редакция — затова
+    заключването и копирането са едно действие, не две.
+    """
+    if not p or os.path.dirname(os.path.abspath(p)) == os.path.abspath(IZVORI):
+        return
+    os.makedirs(IZVORI, exist_ok=True)
+    cel = os.path.join(IZVORI, os.path.basename(p))
+    nov = open(p, "rb").read()
+    if os.path.isfile(cel) and open(cel, "rb").read() == nov:
+        return
+    open(cel, "wb").write(nov)
+    print(f"   копие за деплоя обновено: rules/izvori/{os.path.basename(p)}")
+
 
 def cheklist(pin):
     """Сверява чеклиста на входните документи."""
@@ -42,6 +62,7 @@ def cheklist(pin):
     if ok:
         print()
         print("✅ Чеклистът съвпада със заключения отпечатък.")
+        kopirai(chd.path())
         return 0
 
     print()
@@ -50,6 +71,7 @@ def cheklist(pin):
         json.dump(nov, open(chd.LOCK, "w", encoding="utf-8"),
                   ensure_ascii=False, indent=2)
         print(f"✅ Записан нов отпечатък: {os.path.basename(chd.LOCK)}")
+        kopirai(chd.path())
         return 0
     print("Проверката на документите няма да работи, докато не се сверят.")
     return 1
@@ -73,6 +95,7 @@ def matrica(pin):
     if ok:
         print()
         print("✅ Матрицата съвпада със заключения отпечатък.")
+        kopirai(nm.path())
         return 0
 
     print()
@@ -81,6 +104,7 @@ def matrica(pin):
         json.dump(nov, open(nm.LOCK, "w", encoding="utf-8"),
                   ensure_ascii=False, indent=2)
         print(f"✅ Записан нов отпечатък: {os.path.basename(nm.LOCK)}")
+        kopirai(nm.path())
         return 0
     print("Списъкът с нормативни документи няма да се предлага, докато не се сверят.")
     print("Ако промяната е очаквана: python tools/pin_naredba.py --pin")
@@ -163,6 +187,7 @@ def main():
     print()
     if not r:
         print("✅ Наредба № 1 съвпада със заключения отпечатък.")
+        kopirai(n1.path())
         pin = "--pin" in sys.argv
         kod = naredba7(pin)
         kod = matrica(pin) or kod
@@ -175,6 +200,7 @@ def main():
     if "--pin" in sys.argv:
         json.dump(nov, open(n1.LOCK, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
         print(f"\n✅ Записан нов отпечатък: {os.path.basename(n1.LOCK)}")
+        kopirai(n1.path())
         print("   Провери, че правилата пак минават случаите си: python tools/rules_doc.py")
         return 0
 

@@ -25,9 +25,12 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_DIR)
 LOCK = os.path.join(_DIR, "cheklist_dokumenti.lock.json")
 
+# Първо папката на оператора — за да печели това, което тя току-що е поправила.
+# После копието в хранилището: то е единственото, което стига до Railway.
 _TARSI = [
     os.path.join(os.path.dirname(_ROOT), "Закони инаредби"),
     os.path.join(os.path.dirname(_ROOT), "Закони и наредби"),
+    os.path.join(_DIR, "izvori"),
     _ROOT,
 ]
 
@@ -150,6 +153,14 @@ def spisak(priznaci, nalichni=None):
             izhod.append({**red, "sastoyanie": "не се изисква"})
             continue
         vpisan = imena.get(red["dokument"].strip().lower())
+        # Име без номер не е доказателство. Колоната „Доказва се с“ казва какво
+        # трябва да е налице; щом го иска, а полето е празно, точката остава
+        # недоказана — иначе чеклистът щеше да се успокоява от самото изброяване.
+        nomer = str((vpisan or {}).get("nomer", "")).strip()
+        if vpisan and red["dokazva_se"] and not nomer:
+            izhod.append({**red, "sastoyanie": "не е доказано", "vpisan": vpisan,
+                          "lipsva_nomer": True})
+            continue
         izhod.append({**red,
                       "sastoyanie": "налице" if vpisan else "не е доказано",
                       "vpisan": vpisan})
