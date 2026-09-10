@@ -1042,8 +1042,16 @@ def _vpishi_zk_ot_pasport(cur, tenant_id, pi, passport):
     носи ръчно сложен статус („заменена“) и не бива да се връща на „издадена“.
     """
     nomer = _ot_pasporta(passport, "zk.number", "ЗК_Номер")
+    if not nomer:
+        return None, None
     if not nomer.isdigit():
-        return None
+        # Досега такъв номер („1050/2024“) се пропускаше мълчаливо.
+        return None, f"№ „{nomer}“ не е вписан в регистъра — не е число."
+    cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (str(tenant_id),))
+    ok, prichina = _zk_reshenie(int(nomer), _zk_redove(cur, tenant_id),
+                                _zk_nachalen(cur, tenant_id))
+    if not ok:
+        return None, prichina
     stroej = _ot_pasporta(passport, "stroej", "Строеж")
     adres = _ot_pasporta(passport, "address", "Адрес")
     obekt = ", ".join(x for x in (stroej, adres) if x)
@@ -1056,7 +1064,7 @@ def _vpishi_zk_ot_pasport(cur, tenant_id, pi, passport):
           _ot_pasporta(passport, "zk.date", "ЗК_Дата") or None,
           pi, obekt or None))
     red = cur.fetchone()
-    return int(nomer) if red else None
+    return (int(nomer) if red else None), None
 
 
 @app.route("/api/passports/<pi>", methods=["POST"])
@@ -1086,12 +1094,12 @@ def save_passport(pi):
                             consultant = EXCLUDED.consultant, passport = EXCLUDED.passport,
                             updated_at = NOW()
                 """, (pi, str(tenant_id), stroej, address, consultant, json.dumps(passport)))
-                vpisan_zk = _vpishi_zk_ot_pasport(cur, tenant_id, pi, passport)
+                vpisan_zk, zk_greshka = _vpishi_zk_ot_pasport(cur, tenant_id, pi, passport)
         conn.close()
         log_action("save_passport", user_id=request.current_user["sub"], tenant_id=tenant_id,
-                   detail={"pi": pi, "zk_vpisana": vpisan_zk})
+                   detail={"pi": pi, "zk_vpisana": vpisan_zk, "zk_greshka": zk_greshka})
         return jsonify({"status": "ok", "pi": pi, "tenant_id": tenant_id,
-                        "zk_vpisana": vpisan_zk})
+                        "zk_vpisana": vpisan_zk, "zk_greshka": zk_greshka})
     except Exception as e:
         import traceback
         return jsonify({"error": str(e), "type": type(e).__name__,
@@ -1283,12 +1291,45 @@ def _zk_sledvasht(redove, nachalen):
 
     Не е просто най-големият + 1: регистърът тръгва оттам, докъдето фирмата е
     стигнала на хартия. Празен регистър с начален номер 4568 дава 4568.
+
+    Анулираните НЕ се броят. Така пробно генерирана и анулирана книга в края
+    връща номера си на следващото генериране (операторът, 10.09.2026: „всяко
+    пробно генериране изяжда номер, може човешка грешка“). Анулирана в средата
+    остава на мястото си — след нея вече има издадени и тя не може да се даде
+    отново, без да се обърка редът.
     """
-    nomera = [r["nomer"] for r in redove]
-    if not nomera:
-        return nachalen
-    sledvasht = max(nomera) + 1
+    zhivi = [r["nomer"] for r in redove if r.get("status") != "анулирана"]
+    if not zhivi:
+        vse = [r["nomer"] for r in redove]
+        return nachalen or (min(vse) if vse else None)
+    sledvasht = max(zhivi) + 1
     return max(sledvasht, nachalen) if nachalen else sledvasht
+
+
+def _zk_redove(cur, tenant_id):
+    cur.execute("SELECT nomer, status, pi FROM zapovedni_knigi WHERE tenant_id = %s",
+                (str(tenant_id),))
+    return [dict(r) for r in cur.fetchall()]
+
+
+def _zk_reshenie(nomer, redove, nachalen):
+    """Може ли този номер да влезе в регистъра — (да/не, защо).
+
+    Регистърът не приема случайни номера (операторът, 10.09.2026). Допустимо е:
+      · номер, който вече е вписан — това е поправка на реда;
+      · номер под началния — архивна книга отпреди системата;
+      · точно следващият по регистъра.
+    Всичко друго се отказва с причина, вместо да се впише мълчаливо.
+    """
+    if any(r["nomer"] == nomer for r in redove):
+        return True, "вече е в регистъра"
+    if nachalen and nomer < nachalen:
+        return True, "архивна книга — преди началото на регистъра"
+    sl = _zk_sledvasht(redove, nachalen)
+    if sl is None or nomer == sl:
+        return True, "следващият по регистъра"
+    return False, (f"№ {nomer} не е вписан в регистъра — не е следващият. "
+                   f"Следващият по регистъра е № {sl}.")
 
 
 @app.route("/api/zk", methods=["GET"])
@@ -1351,6 +1392,13 @@ def zk_zapishi():
     try:
         with conn:
             with conn.cursor() as cur:
+                # Под заключване: двама едновременно не бива да видят един и същ
+                # „следващ“ и двамата да го впишат.
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (str(tenant_id),))
+                ok, prichina = _zk_reshenie(nomer, _zk_redove(cur, tenant_id),
+                                            _zk_nachalen(cur, tenant_id))
+                if not ok:
+                    return jsonify({"error": prichina}), 409
                 cur.execute("""
                     INSERT INTO zapovedni_knigi
                         (tenant_id, nomer, data, pi, obekt, status, sledvashta, belejka)
@@ -1373,6 +1421,67 @@ def zk_zapishi():
     log_action("zk_zapis", user_id=request.current_user["sub"], tenant_id=tenant_id,
                detail={"nomer": nomer, "status": status})
     return jsonify(red)
+
+
+@app.route("/api/zk/zaemi", methods=["POST"])
+@require_auth
+def zk_zaemi():
+    """Дава номер на заповедна книга при генериране — следващия по регистъра.
+
+    Номерът го раздава сървърът, не браузърът: двама, генериращи едновременно,
+    иначе биха получили един и същ. Заключването е за фирмата (tenant).
+
+    Повторно генериране за същия обект НЕ изяжда нов номер — връща неговия.
+    Анулиран номер в края се дава отново (виж _zk_sledvasht): редът му се
+    съживява като „издадена“, вместо да се прави нов.
+    """
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Токенът не съдържа tenant_id"}), 403
+    body = request.get_json() or {}
+    pi = (body.get("pi") or "").strip() or None
+    obekt = (body.get("obekt") or "").strip() or None
+    data = (body.get("data") or "").strip() or None
+
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е конфигурирана"}), 503
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (str(tenant_id),))
+                if pi:
+                    cur.execute("""
+                        SELECT nomer FROM zapovedni_knigi
+                        WHERE tenant_id = %s AND pi = %s AND status <> 'анулирана'
+                        ORDER BY nomer DESC LIMIT 1
+                    """, (str(tenant_id), pi))
+                    ima = cur.fetchone()
+                    if ima:
+                        return jsonify({"nomer": ima["nomer"], "nov": False})
+
+                nomer = _zk_sledvasht(_zk_redove(cur, tenant_id),
+                                      _zk_nachalen(cur, tenant_id))
+                if nomer is None:
+                    return jsonify({"error": "Регистърът няма начален номер — задай го "
+                                             "в „Заповедни книги“."}), 409
+                cur.execute("""
+                    INSERT INTO zapovedni_knigi (tenant_id, nomer, data, pi, obekt, status)
+                    VALUES (%s, %s, %s, %s, %s, 'издадена')
+                    ON CONFLICT (tenant_id, nomer) DO UPDATE SET
+                        data = EXCLUDED.data, pi = EXCLUDED.pi, obekt = EXCLUDED.obekt,
+                        status = 'издадена', sledvashta = NULL,
+                        belejka = 'дадена отново след анулиране', updated_at = NOW()
+                    WHERE zapovedni_knigi.status = 'анулирана'
+                    RETURNING nomer
+                """, (str(tenant_id), nomer, data, pi, obekt))
+                if not cur.fetchone():
+                    return jsonify({"error": f"№ {nomer} е зает — опитай пак."}), 409
+    finally:
+        conn.close()
+    log_action("zk_zaemi", user_id=request.current_user["sub"], tenant_id=tenant_id,
+               detail={"nomer": nomer, "pi": pi})
+    return jsonify({"nomer": nomer, "nov": True})
 
 
 @app.route("/api/zk/nachalen", methods=["POST"])
