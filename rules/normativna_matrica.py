@@ -41,11 +41,29 @@ GLAVA_OBSHTI = "| Нормативен акт |"
 GLAVA_PO_VID = "| Група и типове строежи |"
 
 
-def path():
+def _vsichki():
+    """Всички файлове с матрицата в първата папка, където има такива."""
     for d in _TARSI:
-        for p in glob.glob(os.path.join(d, "*нормативна уредба*.md")):
-            return p
-    return None
+        hit = sorted(glob.glob(os.path.join(d, "*нормативна уредба*.md")))
+        if hit:
+            return hit
+    return []
+
+
+def path():
+    hit = _vsichki()
+    return hit[0] if hit else None
+
+
+def dvoini():
+    """Имената, ако в папката има повече от един файл с матрицата.
+
+    Четецът взимаше първия по азбучен ред — „нормативна уредба.md“ бие
+    „нормативна уредба1.md“, така че новата редакция на оператора щеше да се
+    пренебрегне мълчаливо (10.09.2026). При двусмислие се отказва, не се гадае.
+    """
+    hit = _vsichki()
+    return [os.path.basename(p) for p in hit] if len(hit) > 1 else []
 
 
 def _redove_na_tablica(tekst, glava):
@@ -65,6 +83,9 @@ def _redove_na_tablica(tekst, glava):
 
 
 def _bez_udebelyavane(s):
+    # Маркирането от Word („<span class="mark">“) идва при износ в markdown —
+    # маха се, иначе влиза в името на групата и оттам в доклада.
+    s = re.sub(r"<[^>]+>", "", s)
     return re.sub(r"\*\*(.+?)\*\*", r"\1", s).strip()
 
 
@@ -115,6 +136,9 @@ def otpechatak():
 
 def zaklyucheno():
     """Съвпада ли източникът със заключения отпечатък."""
+    d = dvoini()
+    if d:
+        return False, "два файла с матрицата: " + " · ".join(d) + " — остави един"
     if not os.path.isfile(LOCK):
         return False, "няма записан отпечатък"
     sega = otpechatak()
@@ -158,7 +182,9 @@ PREDNAZNACHENIE_KAM_GRUPA = {
     "път":            "Пътища и улици",
     "мост":           "Мостове",
     "жп":             "Железопътни",
-    "енергийна":      "Електроцентрали",
+    # Операторът преименува групата на 10.09.2026 и я раздели по мощност:
+    # над 35 kV и трансформатори от 16 MVA — тук; до 35 kV — „Подземни мрежи“.
+    "енергийна":      "електрически мрежи",
     "вей":            "Фотоволтаични",
     "газ":            "Топлофикационни",
     "вик":            "Водопроводи",

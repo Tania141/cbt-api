@@ -86,6 +86,10 @@ def matrica(pin):
     if not nm.path():
         print("✗ справочникът не е намерен")
         return 1
+    if nm.dvoini():
+        print("✗ два файла с матрицата: " + " · ".join(nm.dvoini()))
+        print("  Остави един — иначе не е ясно коя редакция се заключва.")
+        return 1
     nov = nm.otpechatak()
     print(f"файл:   {nov['fajl']}")
     print(f"sha256: {nov['sha256'][:16]}…")
