@@ -66,6 +66,20 @@ def dvoini():
     return [os.path.basename(p) for p in hit] if len(hit) > 1 else []
 
 
+USLOVIYA = "*условия към матрицата*.md"
+GLAVA_USLOVIYA = "| Ключова дума |"
+
+
+def path_usloviya():
+    """Файлът с условията — отделно от матрицата, защото тя се изнася от Word
+    и добавена колона там би изчезнала при следващия износ."""
+    for d in _TARSI:
+        hit = sorted(glob.glob(os.path.join(d, USLOVIYA)))
+        if hit:
+            return hit[0]
+    return None
+
+
 def _redove_na_tablica(tekst, glava):
     """Редовете на таблицата, чийто заглавен ред започва с `glava`."""
     redove = tekst.split("\n")
@@ -95,7 +109,12 @@ def _akt_ove(s):
     Разделителят в справочника е точка и запетая. Понякога в един ред стоят и
     двойки „Закон … и Наредба …“ — те се пазят цели, защото така са написани.
     """
-    return [_bez_udebelyavane(x) for x in s.split(";") if _bez_udebelyavane(x)]
+    return [_chist_akt(x) for x in s.split(";") if _chist_akt(x)]
+
+
+def _chist_akt(s):
+    """Без маркиране и без точката накрая — „ЗУТ.“ в края на клетката е „ЗУТ“."""
+    return _bez_udebelyavane(s).rstrip(" .;")
 
 
 def chetene():
@@ -110,13 +129,33 @@ def chetene():
                "koga": r[2] if len(r) > 2 else ""}
               for r in _redove_na_tablica(tekst, GLAVA_OBSHTI)]
 
-    po_vid = [{"grupa": _bez_udebelyavane(r[0]),
+    po_vid = [{"grupa": _bez_udebelyavane(r[0]).rstrip(" .;"),
                "zadaljitelni": _akt_ove(r[1]) if len(r) > 1 else [],
                "uslovni": _akt_ove(r[2]) if len(r) > 2 else [],
                "proverki": r[3] if len(r) > 3 else ""}
               for r in _redove_na_tablica(tekst, GLAVA_PO_VID)]
 
     return obshti, po_vid
+
+
+def chetene_usloviya():
+    """[(ключова дума, условие)] в реда от файла — първото съвпадение печели."""
+    p = path_usloviya()
+    if not p:
+        return []
+    tekst = open(p, encoding="utf-8").read()
+    return [(r[0].strip(), (r[1] if len(r) > 1 else "").strip() or "винаги")
+            for r in _redove_na_tablica(tekst, GLAVA_USLOVIYA) if r[0].strip()]
+
+
+def _otpechatak_usloviya():
+    p = path_usloviya()
+    if not p:
+        return None
+    raw = open(p, "rb").read().replace(b"\r\n", b"\n")
+    return {"fajl": os.path.basename(p),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "pravila": len(chetene_usloviya())}
 
 
 def otpechatak():
@@ -131,6 +170,9 @@ def otpechatak():
         "obshti": len(obshti or []),
         "grupi": len(po_vid or []),
         "imena_grupi": [g["grupa"] for g in (po_vid or [])],
+        # Условията са заключени заедно с матрицата: смяна в който и да е от
+        # двата файла сменя списъка в доклада.
+        "usloviya": _otpechatak_usloviya(),
     }
 
 
@@ -146,6 +188,11 @@ def zaklyucheno():
         return False, "справочникът не е намерен"
     with open(LOCK, encoding="utf-8") as f:
         star = json.load(f)
+    if sega["usloviya"] is None:
+        return False, ("липсва „условия към матрицата.md“ — без него условните "
+                       "актове не могат да се решат")
+    if sega["usloviya"] != star.get("usloviya"):
+        return False, "условията към матрицата са променени"
     if sega["sha256"] != star.get("sha256"):
         razliki = []
         if sega["obshti"] != star.get("obshti"):
@@ -195,28 +242,95 @@ PREDNAZNACHENIE_KAM_GRUPA = {
 }
 
 
-def za_obekt(prednaznachenie):
+def _savpada(klyuch, akt):
+    """Съкращение с главни букви — като цяла дума; иначе — като начало на дума."""
+    if klyuch.isupper():
+        return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(klyuch), akt) is not None
+    return re.search(r"(?<!\w)%s" % re.escape(klyuch), akt, re.I) is not None
+
+
+def _uslovie_za(akt, pravila):
+    """Условието на първия ред, чиято ключова дума се среща в акта — или None."""
+    return next((u for k, u in pravila if _savpada(k, akt)), None)
+
+
+def _klyuchove(akt):
+    """Разпознаваеми белези на акт — за да не излиза един и същ два пъти.
+
+    „ЗУТ“ и „Закон за устройство на територията (ЗУТ)“ са едно; „Наредба
+    № 4/2001“ и „Наредба № 4 от 21.05.2001 г.“ — също. Акт без такъв белег
+    („пожарна безопасност“) никога не се смята за повторение: по-добре два
+    пъти, отколкото изпуснат.
+
+    „РД“ от „РД-02-20-3“ НЕ е съкращение: иначе всички наредби РД-… биха
+    изглеждали като една и различни актове биха изпадали като „повторение“.
+    """
+    k = set(re.findall(r"(?<![\w-])([А-Я]{2,5})(?![\w-])", akt))
+    k |= {f"{n}/{g}" for n, g in re.findall(
+        r"№\s*([\w-]+?)\s*(?:/\s*|от\s+[\d.]*?)(\d{4})", akt)}
+    return k
+
+
+def za_obekt(pr):
     """Предложение за нормативната рамка на този обект.
 
-    Връща речник с общите актове, задължителните и условните за групата, и
-    какво се проверява. При незаключен източник връща само причината — по-добре
-    нищо, отколкото списък, за който не знаем от коя редакция е.
+    `pr` са признаците на обекта с имената от чеклиста („предназначение“,
+    „вид“, „паметник“, …) — същите, по които чеклистът решава кои документи се
+    изискват. Затова двете проверки не могат да се разминат за един обект.
+    Приема и само предназначение като низ — за старите извиквания.
+
+    Общите влизат, освен ако условие в „условия към матрицата.md“ ги изключи.
+    Условните влизат САМО при изпълнено условие. Задължителните — винаги.
+    При незаключен източник връща само причината.
     """
+    if isinstance(pr, str):
+        pr = {"предназначение": pr}
     ok, prichina = zaklyucheno()
     if not ok:
         return {"greshka": f"справочникът не е заключен: {prichina}"}
 
+    from rules.cheklist_dokumenti import prilozhim
     obshti, po_vid = chetene()
-    klyuch = PREDNAZNACHENIE_KAM_GRUPA.get(prednaznachenie)
+    pravila = chetene_usloviya()
+
+    def vliza(akt, bez_pravilo):
+        u = _uslovie_za(akt, pravila)
+        return bez_pravilo if u is None else prilozhim(u, pr)
+
+    vpisani = set()
+    vpisani_tekst = []
+
+    def bez_povtorenia(spisak):
+        izhod = []
+        for a in spisak:
+            k = _klyuchove(a)
+            if k and k <= vpisani:
+                continue
+            # Актовете без съкращение („Закон за пътищата“) се хващат по текст:
+            # щом вече стоят вътре в изписан акт, са повторение. Прагът от 10
+            # знака пази късите общи думи — „шум“ не е „Наредба № 4/2006“.
+            t = a.lower()
+            if len(t) >= 10 and any(t in v for v in vpisani_tekst):
+                continue
+            izhod.append(a)
+            vpisani.update(k)
+            vpisani_tekst.append(t)
+        return izhod
+
+    klyuch = PREDNAZNACHENIE_KAM_GRUPA.get(pr.get("предназначение", ""))
     grupa = None
     if klyuch:
         grupa = next((g for g in po_vid if klyuch.lower() in g["grupa"].lower()), None)
 
+    obshti_v = bez_povtorenia([a["akt"] for a in obshti if vliza(a["akt"], True)])
+    zadalj = bez_povtorenia(grupa["zadaljitelni"]) if grupa else []
+    uslovni = bez_povtorenia([a for a in grupa["uslovni"] if vliza(a, False)]) if grupa else []
+
     return {
-        "obshti": [a["akt"] for a in obshti],
+        "obshti": obshti_v,
         "grupa": grupa["grupa"] if grupa else None,
-        "zadaljitelni": grupa["zadaljitelni"] if grupa else [],
-        "uslovni": grupa["uslovni"] if grupa else [],
+        "zadaljitelni": zadalj,
+        "uslovni": uslovni,
         "proverki": grupa["proverki"] if grupa else "",
         # Справочникът сам се определя като карта за първоначално определяне,
         # не като затворен списък. Изходът е предложение, не заключение.

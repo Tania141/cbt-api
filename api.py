@@ -1243,22 +1243,11 @@ def cheklist_dokumenti():
     body = request.get_json() or {}
     d = rows_to_dict(body.get("passport", []))
 
-    def da(v):
-        return str(v).strip().lower() in ("да", "true", "1", "yes")
-
-    vid_kam_dumi = {"sgrada": "сграда", "lineen": "линеен",
-                    "lineen_ktp": "линеен", "saorajenie": "съоръжение"}
-    priznaci = {
-        "категория":       str(d.get("Категория", "")).strip()[:1],
-        "предназначение":  d.get("Предназначение", "").strip() or "жилищна",
-        "вид":             vid_kam_dumi.get(d.get("Вид", "sgrada"), "сграда"),
-        "паметник":        da(d.get("Паметник", "")),
-        "защитена_зона":   da(d.get("Защитена_Зона", "")),
-        "опасни_вещества": da(d.get("Опасни_Вещества", "")),
-        "спо":             bool(str(d.get("СПО", "")).strip()),
-        "води":            da(d.get("Води", "")),
-        "преработка":      d.get("Повод", "").strip() == "преработка_154",
-    }
+    # Същите признаци, по които матрицата решава условните актове — една
+    # функция за двете, за да не може обектът да е паметник за едното, а за
+    # другото не.
+    from cbt_docx import _priznaci_cheklist
+    priznaci = _priznaci_cheklist(d)
 
     n = int(d.get("Документи_Брой", 0) or 0)
     nalichni = [{"dokument": d.get(f"Документ_{i}_Име", ""),

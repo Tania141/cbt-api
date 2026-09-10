@@ -318,6 +318,7 @@ def _osip_priznaci(d):
         "zashtitena":      da(d.get("Защитена_Зона", "")),
         "pametnik":        da(d.get("Паметник", "")),
         "opasni":          da(d.get("Опасни_Вещества", "")),
+        "vodi":            da(d.get("Води", "")),
         "menya_pokazateli": da(d.get("Мени_Показатели", "")),
         "pup":             d.get("ПУП_Одобрен", "").strip(),
         "kadastr":         d.get("Кадастрална_Карта", "").strip(),
@@ -361,6 +362,27 @@ def _osip_ocenki(d):
     return izhod
 
 
+def _priznaci_cheklist(d):
+    """Признаците на обекта с имената от чеклиста.
+
+    Една функция за чеклиста на документите и за нормативната матрица, за да не
+    се разминат: ако чеклистът смята обекта за паметник, и матрицата трябва да
+    го смята — иначе единият иска съгласуване с НИНКН, а другият не цитира ЗКН.
+    """
+    p = _osip_priznaci(d)
+    return {
+        "категория":       p["kategoria"],
+        "предназначение":  p["prednaznachenie"],
+        "вид":             p["vid"],
+        "паметник":        p["pametnik"],
+        "защитена_зона":   p["zashtitena"],
+        "опасни_вещества": p["opasni"],
+        "спо":             bool(p["spo"]),
+        "води":            p["vodi"],
+        "преработка":      p["povod"] == "преработка_154",
+    }
+
+
 def _normativni_dokumenti(d):
     """Приложимите нормативни актове — предложение по матрицата.
 
@@ -372,13 +394,18 @@ def _normativni_dokumenti(d):
         return rachno
     from rules import normativna_matrica as nm
 
-    r = nm.za_obekt(_osip_priznaci(d)["prednaznachenie"])
+    r = nm.za_obekt(_priznaci_cheklist(d))
     if r.get("greshka") or not r.get("obshti"):
         return "[___]"
     redove = [f"• {a}" for a in r["obshti"]]
     if r.get("zadaljitelni"):
         redove.append(f"Специални за групата „{r['grupa']}“:")
         redove += [f"• {a}" for a in r["zadaljitelni"]]
+    # Условните — само тези, чието условие обектът изпълнява (паметник → ЗКН,
+    # защитена зона → ЗБР, …). Решава го „условия към матрицата.md“, не кодът.
+    if r.get("uslovni"):
+        redove.append("Приложими за този обект поради особеностите му:")
+        redove += [f"• {a}" for a in r["uslovni"]]
     return "\n".join(redove)
 
 

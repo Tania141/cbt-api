@@ -100,6 +100,7 @@ def matrica(pin):
         print()
         print("✅ Матрицата съвпада със заключения отпечатък.")
         kopirai(nm.path())
+        kopirai(nm.path_usloviya())
         return 0
 
     print()
@@ -109,6 +110,7 @@ def matrica(pin):
                   ensure_ascii=False, indent=2)
         print(f"✅ Записан нов отпечатък: {os.path.basename(nm.LOCK)}")
         kopirai(nm.path())
+        kopirai(nm.path_usloviya())
         return 0
     print("Списъкът с нормативни документи няма да се предлага, докато не се сверят.")
     print("Ако промяната е очаквана: python tools/pin_naredba.py --pin")
