@@ -1,26 +1,38 @@
-"""Градоустройствени показатели — две нива на проверка.
+"""Градоустройствени показатели — проектът срещу визата.
 
-    проект  ≤  виза          постигнатото спазва ли зададеното
-    виза    ∈  Наредба № 7   самата виза в нормата за зоната ли е
+    постигнато по проект  спазва  зададеното с визата
 
-Двата входа са различни документи: визата ЗАДАВА, проектът ПОСТИГА. Затова
-това не е преписване, а истинска проверка.
+Визата ЗАДАВА, проектът ПОСТИГА — два различни документа, затова това е
+истинска проверка, а не преписване.
+
+БЕЗ НАРЕДБА № 7 — РЕШЕНИЕ НА ОПЕРАТОРА (11.09.2026)
+---------------------------------------------------
+Имаше и второ ниво: самата виза в диапазона на Наредба № 7 за зоната. Махнато
+е. Наредбата е „толкова разтеглива“ — числата зависят от големината на града,
+за много зони се определят с плана — „нека си я четат главните архитекти,
+които издават визата“. Надзорът проверява проекта срещу визата.
+
+ПОСТИГНАТОТО СЕ СМЯТА, НЕ СЕ ПРЕПИСВА
+-------------------------------------
+Операторът въвежда стойностите от проекта — ЗП и РЗП в м², озеленяването в %,
+котата корниз в м — и площта на имота. Системата смята плътността
+(ЗП / площ) и интензивността (РЗП / площ). Стари обекти, въведени направо в
+проценти, се четат както са — числа за реален обект не се измислят.
 
 ОБРАТНИЯТ ЗНАК
 --------------
-Плътността, интензивността и котата корниз са МАКСИМУМИ — постигнатото не бива
-да ги надвишава. Озеленяването е МИНИМУМ — постигнатото не бива да е под него.
-Точно такива неща минават незабелязано при бърз преглед.
+Плътността, интензивността и котата корниз са МАКСИМУМИ; озеленяването е
+МИНИМУМ. Точно такива неща минават незабелязано при бърз преглед.
 """
 import re
 from .engine import rule, Verdict, OK, WARN, UNKNOWN
-from . import naredba7 as n7
 
 POKAZATELI = [
     # ключ        име                        посока  единица
     ("plytnost", "плътност на застрояване",  "max",  "%"),
     ("kint",     "интензивност (К инт.)",    "max",  ""),
     ("ozel",     "озеленена площ",           "min",  "%"),
+    ("kk",       "кота корниз (Н)",          "max",  " м"),
 ]
 
 
@@ -35,21 +47,38 @@ def _chislo(v):
 
 
 def _pok(project, kade):
-    """Показателите от визата или от проекта."""
+    """Показателите от визата или въведените направо в проценти от проекта."""
     d = (project.get("gradoustroystvo") or {}).get(kade) or {}
     return {k: _chislo(d.get(k)) for k, *_ in POKAZATELI}
 
 
-def _p(zona=None, viza=None, proekt=None, darvesna=None):
+def postignato(project):
+    """Постигнатото по проект — (показатели, откъде).
+
+    „изчислено“ — плътността и интензивността от ЗП и РЗП върху площта на
+    имота; „въведено“ — стари обекти с проценти направо.
+    """
+    g = project.get("gradoustroystvo") or {}
+    pr = g.get("proekt") or {}
+    plosht = _chislo(g.get("plosht"))
+    zp, rzp = _chislo(pr.get("zp")), _chislo(pr.get("rzp"))
+    rez = _pok(project, "proekt")
+    otkade = "въведено"
+    if plosht and (zp is not None or rzp is not None):
+        otkade = "изчислено"
+        rez["plytnost"] = round(zp / plosht * 100, 1) if zp is not None else None
+        rez["kint"] = round(rzp / plosht, 2) if rzp is not None else None
+    return rez, otkade
+
+
+def _p(viza=None, proekt=None, plosht=None):
     g = {}
     if viza:
         g["viza"] = viza
     if proekt:
         g["proekt"] = proekt
-    if zona:
-        g["zona"] = zona
-    if darvesna is not None:
-        g["darvesna"] = darvesna
+    if plosht is not None:
+        g["plosht"] = plosht
     return {"gradoustroystvo": g}
 
 
@@ -64,6 +93,13 @@ def _gur(**promeni):
     return izmeni(R_GUR, gradoustroystvo={**_G, **promeni})
 
 
+# Изчислителен пример — числата са като в примера на оператора (ЗП 1230 м²,
+# РЗП 12 000 м², к.к. 10 м) върху имот от 5000 м². Не е реален обект и не се
+# представя за такъв.
+_VIZA_PRIMER = {"plytnost": "40", "kint": "2,5", "ozel": "20", "kk": "10"}
+_PROEKT_PRIMER = {"zp": "1230", "rzp": "12000", "ozel": "20", "kk": "10"}
+
+
 @rule(
     code="G1",
     title="Постигнатото по проект спазва зададеното с визата",
@@ -71,134 +107,53 @@ def _gur(**promeni):
              "за имота; проектът се съобразява с тях.",
     what="Плътността, интензивността и котата корниз са МАКСИМУМИ — постигнатото не бива "
          "да ги надвишава. Озеленяването е МИНИМУМ — постигнатото не бива да е под него. "
-         "Обратният знак на озеленяването е най-честият пропуск при бърз преглед.",
+         "Плътността и интензивността се смятат от ЗП и РЗП върху площта на имота.",
     cases=[
-        ("ГУРМАЗОВО — както е в доклада", R_GUR, OK),
+        ("ГУРМАЗОВО — както е в доклада (проценти, въведени направо)", R_GUR, OK),
         ("същият обект с плътност 45% по проект",
          _gur(proekt=dict(PROEKT_GURMAZOVO, plytnost="45,0")), WARN),
         ("същият обект с озеленяване 42% — под изискваните 50%",
          _gur(proekt=dict(PROEKT_GURMAZOVO, ozel="42,0")), WARN),
+        ("изчислителен пример: ЗП 1230, РЗП 12 000 върху 5000 м² — 24,6% и Кинт 2,40",
+         _p(viza=_VIZA_PRIMER, proekt=_PROEKT_PRIMER, plosht="5000"), OK),
+        ("изчислителен пример с РЗП 13 000 — Кинт 2,60 над 2,5 по виза",
+         _p(viza=_VIZA_PRIMER, proekt=dict(_PROEKT_PRIMER, rzp="13000"), plosht="5000"), WARN),
+        ("изчислителен пример с к.к. 10,5 м при 10 м по виза",
+         _p(viza=_VIZA_PRIMER, proekt=dict(_PROEKT_PRIMER, kk="10,5"), plosht="5000"), WARN),
+        ("ЗП и РЗП без площта на имота — не може да се сметне",
+         _p(viza=_VIZA_PRIMER, proekt={"zp": "1230", "rzp": "12000"}), UNKNOWN),
         ("още няма показатели от проекта", _p(viza=VIZA_GURMAZOVO), UNKNOWN),
         ("още няма виза", _p(proekt=PROEKT_GURMAZOVO), UNKNOWN),
     ],
 )
 def proekt_sreshtu_viza(project):
-    viza, proekt = _pok(project, "viza"), _pok(project, "proekt")
-    if not any(v is not None for v in viza.values()):
-        return Verdict(UNKNOWN, "Показателите от визата не са въведени.")
-    if not any(v is not None for v in proekt.values()):
-        return Verdict(UNKNOWN, "Постигнатите по проект показатели не са въведени.")
-
-    problemi, proveri = [], []
-    for k, ime, posoka, ed in POKAZATELI:
-        z, p = viza.get(k), proekt.get(k)
-        if z is None or p is None:
-            continue
-        proveri.append(ime)
-        if posoka == "max" and p > z:
-            problemi.append(f"{ime}: {p}{ed} по проект надвишава {z}{ed} по виза")
-        elif posoka == "min" and p < z:
-            problemi.append(f"{ime}: {p}{ed} по проект е под изискваните {z}{ed} по виза")
-    if not proveri:
-        return Verdict(UNKNOWN, "Няма показател, въведен и на двете места.")
-    if problemi:
-        return Verdict(WARN, "Отклонение от визата — " + "; ".join(problemi) + ".")
-    return Verdict(OK, f"Проектът спазва визата по {len(proveri)} показателя: "
-                       + ", ".join(proveri) + ".")
-
-
-@rule(
-    code="G2",
-    title="Самата виза е в нормата за устройствената зона",
-    citation="Наредба № 7 от 22.12.2003 г. за правила и нормативи за устройство на "
-             "отделните видове територии и устройствени зони — чл. 19, ал. 1 (жилищни), "
-             "чл. 20 (комплексно), чл. 24–26 (производствени), чл. 29 (вилни).",
-    what="Второто ниво: визата задава показателите, но самата тя трябва да е в диапазона, "
-         "който наредбата поставя за зоната. Таблицата с диапазоните е сверена срещу "
-         "текста на наредбата и заключена — при изменение правилото млъква.",
-    cases=[
-        ("ГУРМАЗОВО — зона Жм, визата е в нормата", R_GUR, OK),
-        ("същата виза с плътност 70% — над горната граница 60% за Жм",
-         _gur(viza=dict(VIZA_GURMAZOVO, plytnost="70")), WARN),
-        ("същата виза с озеленяване 30% — под долната граница 40% за Жм",
-         _gur(viza=dict(VIZA_GURMAZOVO, ozel="30")), WARN),
-        ("производствена зона Пч", _p(zona="Пч", viza={"plytnost": "60", "kint": "1,5", "ozel": "30"}), OK),
-        ("зоната не е посочена", _p(viza=VIZA_GURMAZOVO), UNKNOWN),
-        ("непозната зона", _p(zona="Ху", viza=VIZA_GURMAZOVO), UNKNOWN),
-    ],
-)
-def viza_sreshtu_naredba(project):
-    g = project.get("gradoustroystvo") or {}
-    zona = (g.get("zona") or "").strip()
-    if not zona:
-        return Verdict(UNKNOWN, "Устройствената зона не е посочена — без нея няма диапазон.")
-    if zona not in n7.ZONI:
-        return Verdict(UNKNOWN, f"Зона „{zona}“ не е в таблицата по Наредба № 7. "
-                                f"Известни: {', '.join(n7.ZONI)}.")
-    ok, prichina = n7.zakliuchena()
-    if not ok:
-        return Verdict(UNKNOWN, prichina)
-
     viza = _pok(project, "viza")
     if not any(v is not None for v in viza.values()):
         return Verdict(UNKNOWN, "Показателите от визата не са въведени.")
 
-    z = n7.ZONI[zona]
+    g = project.get("gradoustroystvo") or {}
+    sur = g.get("proekt") or {}
+    pr, otkade = postignato(project)
+    ima_stoynosti = _chislo(sur.get("zp")) is not None or _chislo(sur.get("rzp")) is not None
+    if ima_stoynosti and not _chislo(g.get("plosht")) and pr["plytnost"] is None and pr["kint"] is None:
+        return Verdict(UNKNOWN, "Въведени са ЗП/РЗП, но липсва площта на имота — "
+                                "плътността и интензивността не могат да се сметнат.")
+    if not any(v is not None for v in pr.values()):
+        return Verdict(UNKNOWN, "Постигнатите по проект показатели не са въведени.")
+
     problemi, proveri = [], []
     for k, ime, posoka, ed in POKAZATELI:
-        v = viza.get(k)
-        if v is None:
+        z, p = viza.get(k), pr.get(k)
+        if z is None or p is None:
             continue
-        lo, hi = z[k]
         proveri.append(ime)
-        if lo is not None and v < lo:
-            problemi.append(f"{ime}: {v}{ed} при норма {n7.opis(z[k], ed)}")
-        elif hi is not None and v > hi:
-            problemi.append(f"{ime}: {v}{ed} при норма {n7.opis(z[k], ed)}")
+        if posoka == "max" and p > z + 1e-9:
+            problemi.append(f"{ime}: {p}{ed} по проект надвишава {z}{ed} по виза")
+        elif posoka == "min" and p < z - 1e-9:
+            problemi.append(f"{ime}: {p}{ed} по проект е под изискваните {z}{ed} по виза")
     if not proveri:
-        return Verdict(UNKNOWN, "Няма въведен показател от визата.")
+        return Verdict(UNKNOWN, "Няма показател, въведен и на двете места.")
     if problemi:
-        return Verdict(WARN, f"Визата излиза извън нормата за зона {zona} "
-                             f"({z['ime']}, {z['chl']}): " + "; ".join(problemi) +
-                             ". Проверете зоната и показателите по визата.")
-    return Verdict(OK, f"Визата е в нормата за зона {zona} ({z['ime']}, {z['chl']}) "
-                       f"по {len(proveri)} показателя.")
-
-
-@rule(
-    code="G3",
-    title="Част от озеленяването с дървесна растителност",
-    citation="Наредба № 7: чл. 19, ал. 2 — една трета от необходимата озеленена площ трябва "
-             "да бъде осигурена за озеленяване с дървесна растителност; същото при чл. 20, "
-             "т. 3 и чл. 24–26. При вилните зони (чл. 29, ал. 1, т. 3) делът е ПОЛОВИНАТА.",
-    what="Изискване, което докладите обикновено премълчават — доказва се само процентът "
-         "озеленяване, а не и делът с дървесна растителност. Съотношението е една трета, "
-         "но при вилна зона — една втора.",
-    cases=[
-        ("ГУРМАЗОВО с 20% дървесна при 50% озеленяване — една трета е налице",
-         _gur(darvesna="20"), OK),
-        ("същият обект с 12% дървесна — под една трета", _gur(darvesna="12"), WARN),
-        ("същите числа във вилна зона — там се иска половината",
-         _gur(zona="Ов", darvesna="20"), WARN),
-        ("ГУРМАЗОВО както е в доклада — делът не се доказва", R_GUR, UNKNOWN),
-    ],
-)
-def darvesna_rastitelnost(project):
-    g = project.get("gradoustroystvo") or {}
-    zona = (g.get("zona") or "").strip()
-    if zona not in n7.ZONI:
-        return Verdict(UNKNOWN, "Устройствената зона не е посочена.")
-    ozel = _pok(project, "proekt").get("ozel")
-    darv = _chislo(g.get("darvesna"))
-    if ozel is None or darv is None:
-        return Verdict(UNKNOWN, "Не са въведени озеленената площ по проект и делът "
-                                "с дървесна растителност.")
-    delitel = n7.ZONI[zona]["darv"]
-    nuzhno = ozel / delitel
-    kak = "една трета" if delitel == 3 else "половината"
-    if darv + 1e-9 >= nuzhno:
-        return Verdict(OK, f"Дървесната растителност е {darv}% при озеленяване {ozel}% — "
-                           f"покрива {kak} ({nuzhno:.1f}%).")
-    return Verdict(WARN, f"Дървесната растителност е {darv}% при озеленяване {ozel}% — "
-                         f"иска се {kak}, тоест поне {nuzhno:.1f}%. "
-                         f"Недостигат {nuzhno - darv:.1f} процентни пункта.")
+        return Verdict(WARN, "Отклонение от визата — " + "; ".join(problemi) + f" ({otkade}).")
+    return Verdict(OK, f"Проектът спазва визата по {len(proveri)} показателя "
+                       f"({otkade}): " + ", ".join(proveri) + ".")
