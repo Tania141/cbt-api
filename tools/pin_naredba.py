@@ -53,6 +53,10 @@ def cheklist(pin):
     if not chd.path():
         print("✗ чеклистът не е намерен")
         return 1
+    if chd.dvoini():
+        print("✗ два файла с чеклиста: " + " · ".join(chd.dvoini()))
+        print("  Остави един — иначе не е ясно коя редакция се заключва.")
+        return 1
     nov = chd.otpechatak()
     print(f"файл:   {nov['fajl']}")
     print(f"sha256: {nov['sha256'][:16]}…")

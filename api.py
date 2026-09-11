@@ -1262,7 +1262,9 @@ def cheklist_dokumenti():
                  "nomer": d.get(f"Документ_{i}_Номер", "")}
                 for i in range(1, n + 1) if d.get(f"Документ_{i}_Име", "")]
 
-    rezultat = chd.spisak(priznaci, nalichni)
+    rezultat = chd.spisak(priznaci, nalichni,
+                          faza=(body.get("faza") or None),
+                          neotnasya=body.get("neotnasya") or [])
     log_action("cheklist", user_id=request.current_user["sub"],
                tenant_id=request.current_user.get("tenant_id"),
                detail={"lipsvat": rezultat.get("lipsvat")})

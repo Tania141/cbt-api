@@ -37,11 +37,29 @@ _TARSI = [
 GLAVA = "| Документ |"
 
 
-def path():
+def _vsichki():
+    """Всички файлове с чеклиста в първата папка, където има такива."""
     for d in _TARSI:
-        for p in glob.glob(os.path.join(d, "*чеклист документи*.md")):
-            return p
-    return None
+        hit = sorted(glob.glob(os.path.join(d, "*чеклист документи*.md")))
+        if hit:
+            return hit
+    return []
+
+
+def path():
+    hit = _vsichki()
+    return hit[0] if hit else None
+
+
+def dvoini():
+    """Имената, ако в папката има повече от един файл с чеклиста.
+
+    Същата клопка като при матрицата (10.09.2026): четецът би взел първия по
+    азбучен ред и мълчаливо би пренебрегнал новата редакция. При двусмислие —
+    отказ, не гадаене.
+    """
+    hit = _vsichki()
+    return [os.path.basename(p) for p in hit] if len(hit) > 1 else []
 
 
 def _tablici(tekst):
@@ -88,6 +106,9 @@ def otpechatak():
 
 
 def zaklyucheno():
+    d = dvoini()
+    if d:
+        return False, "два файла с чеклиста: " + " · ".join(d) + " — остави един"
     if not os.path.isfile(LOCK):
         return False, "няма записан отпечатък"
     sega = otpechatak()
@@ -132,13 +153,33 @@ def prilozhim(uslovie, pr):
     return all(_edno_uslovie(x, pr) for x in uslovie.split(" и "))
 
 
-def spisak(priznaci, nalichni=None):
+# Разделите на файла са фазите (операторът, 11.09.2026): „До разрешение…“ —
+# за ОСИП, „Въвеждане…“ — за Акт 15 / окончателния доклад. Раздел с друго име
+# важи и за двете.
+FAZI = {"osip": "до разрешение", "od": "въвеждане"}
+
+# Второто ниво на условията: паспортът не може да знае (гараж, газ, ОВОС…).
+# Редът се показва „за преценка“ — не се брои за липсващ, докато операторът не
+# реши; „не се отнася“ се отбелязва веднъж на обекта.
+PRECENKA = "ако_е_приложимо"
+
+
+def _faza_na_razdel(razdel):
+    r = razdel.strip().lower()
+    for f, nachalo in FAZI.items():
+        if r.startswith(nachalo):
+            return f
+    return None
+
+
+def spisak(priznaci, nalichni=None, faza=None, neotnasya=None):
     """Кои документи се изискват за този обект и налице ли са.
 
-    `nalichni` е списък от вписаните в паспорта документи: {"dokument", "nomer"}.
-    Съвпадението е по име на документа, без разлика в регистъра.
+    `nalichni` — вписаните документи: {"dokument", "nomer"}; съвпадение по име.
+    `faza` — "osip" или "od": само разделите за тази фаза; без нея — всички.
+    `neotnasya` — имената, отбелязани на обекта като „не се отнася“.
 
-    Състояния: „налице“ · „не е доказано“ · „не се изисква“.
+    Състояния: налице · не е доказано · за преценка · не се отнася · не се изисква.
     """
     ok, prichina = zaklyucheno()
     if not ok:
@@ -146,27 +187,40 @@ def spisak(priznaci, nalichni=None):
 
     imena = {str(x.get("dokument", "")).strip().lower(): x
              for x in (nalichni or []) if str(x.get("dokument", "")).strip()}
+    neot = {str(x).strip().lower() for x in (neotnasya or []) if str(x).strip()}
 
     izhod = []
     for red in chetene():
-        if not prilozhim(red["uslovie"], priznaci):
-            izhod.append({**red, "sastoyanie": "не се изисква"})
+        fr = _faza_na_razdel(red["razdel"])
+        if faza and fr and fr != faza:
             continue
-        vpisan = imena.get(red["dokument"].strip().lower())
-        # Име без номер не е доказателство. Колоната „Доказва се с“ казва какво
-        # трябва да е налице; щом го иска, а полето е празно, точката остава
-        # недоказана — иначе чеклистът щеше да се успокоява от самото изброяване.
+        chasti = [x.strip() for x in red["uslovie"].split(" и ")]
+        precenka = PRECENKA in chasti
+        ostanali = " и ".join(x for x in chasti if x != PRECENKA) or "винаги"
+        if not prilozhim(ostanali, priznaci):
+            izhod.append({**red, "sastoyanie": "не се изисква", "precenka": precenka})
+            continue
+        ime = red["dokument"].strip().lower()
+        vpisan = imena.get(ime)
+        if ime in neot and not vpisan:
+            izhod.append({**red, "sastoyanie": "не се отнася", "precenka": precenka})
+            continue
+        # Име без номер не е доказателство, щом „Доказва се с“ иска нещо.
         nomer = str((vpisan or {}).get("nomer", "")).strip()
         if vpisan and red["dokazva_se"] and not nomer:
             izhod.append({**red, "sastoyanie": "не е доказано", "vpisan": vpisan,
-                          "lipsva_nomer": True})
+                          "lipsva_nomer": True, "precenka": precenka})
             continue
-        izhod.append({**red,
-                      "sastoyanie": "налице" if vpisan else "не е доказано",
-                      "vpisan": vpisan})
+        if vpisan:
+            izhod.append({**red, "sastoyanie": "налице", "vpisan": vpisan, "precenka": precenka})
+            continue
+        izhod.append({**red, "precenka": precenka,
+                      "sastoyanie": "за преценка" if precenka else "не е доказано"})
     return {"redove": izhod,
-            "iziskvani": sum(1 for r in izhod if r["sastoyanie"] != "не се изисква"),
-            "lipsvat": sum(1 for r in izhod if r["sastoyanie"] == "не е доказано")}
+            "faza": faza,
+            "iziskvani": sum(r["sastoyanie"] in ("налице", "не е доказано") for r in izhod),
+            "lipsvat": sum(r["sastoyanie"] == "не е доказано" for r in izhod),
+            "za_precenka": sum(r["sastoyanie"] == "за преценка" for r in izhod)}
 
 
 if __name__ == "__main__":
