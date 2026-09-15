@@ -1293,7 +1293,11 @@ def sloy2_chete():
     except sloy2.NeSeChete as e:
         return jsonify({"greshka": str(e)})
     except anthropic.APIError as e:
+        print(f"sloy2_chete: Claude API грешка за {f.get('ime')}: {e}", flush=True)
         return jsonify({"error": f"Claude API грешка: {str(e)}"}), 502
+    except Exception as e:
+        print(f"sloy2_chete: {type(e).__name__} за {f.get('ime')}: {e}", flush=True)
+        return jsonify({"greshka": f"{type(e).__name__}: {e}"})
     log_action("sloy2_chete", user_id=request.current_user.get("sub"),
                tenant_id=request.current_user.get("tenant_id"),
                model=getattr(response, "model", AI_MODEL),
