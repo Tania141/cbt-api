@@ -1271,6 +1271,53 @@ def cheklist_dokumenti():
     return jsonify({**rezultat, "priznaci": priznaci})
 
 
+# ── Слой 2: АИ-то чете документите, кодът ги сравнява ────────────────────────
+# Един файл на заявка: сканът на 15 страници се чете до минута, а PWA-то
+# показва хода файл по файл. Файлът не се пази — връщат се само фактите.
+
+@app.route("/api/sloy2/chete", methods=["POST"])
+@require_auth
+def sloy2_chete():
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
+    from rules import sloy2
+    body = request.get_json() or {}
+    f = body.get("fajl") or {}
+    agenda = body.get("agenda") or "od"
+    if agenda not in sloy2.AGENDI:
+        return jsonify({"greshka": f"непознат дневен ред „{agenda}“"})
+    try:
+        dok, response = sloy2.procheti(anthropic.Anthropic(api_key=ANTHROPIC_API_KEY), AI_MODEL,
+                                       f.get("ime", ""), f.get("media_type", ""), f.get("data", ""),
+                                       agenda=agenda)
+    except sloy2.NeSeChete as e:
+        return jsonify({"greshka": str(e)})
+    except anthropic.APIError as e:
+        return jsonify({"error": f"Claude API грешка: {str(e)}"}), 502
+    log_action("sloy2_chete", user_id=request.current_user.get("sub"),
+               tenant_id=request.current_user.get("tenant_id"),
+               model=getattr(response, "model", AI_MODEL),
+               tokens_in=response.usage.input_tokens, tokens_out=response.usage.output_tokens,
+               detail={"pi": body.get("pi"), "fajl": f.get("ime"), "agenda": agenda})
+    return jsonify({"dokument": dok})
+
+
+@app.route("/api/sloy2/sravni", methods=["POST"])
+@require_auth
+def sloy2_sravni():
+    """Сравнението е само код — без АИ, може да се пуска колкото пъти трябва."""
+    from rules import sloy2
+    from cbt_docx import _priznaci_cheklist
+    body = request.get_json() or {}
+    agenda = body.get("agenda") or "od"
+    if agenda not in sloy2.AGENDI:
+        return jsonify({"greshka": f"непознат дневен ред „{agenda}“"})
+    priznaci = _priznaci_cheklist(rows_to_dict(body.get("passport", [])))
+    return jsonify(sloy2.sravni(body.get("dokumenti") or [], body.get("pasport") or {},
+                                agenda=agenda, priznaci=priznaci,
+                                neotnasya=body.get("neotnasya") or []))
+
+
 # ── Регистър на заповедните книги ────────────────────────────────────────────
 # Номерът е официален и последователен за фирмата: книгата се заверява и
 # прономерова, и надзорът трябва да може да проследи кой номер на кой обект е
