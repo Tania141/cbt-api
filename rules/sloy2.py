@@ -627,10 +627,17 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
                                                    f"{_dd(x)} — в бъдещето ({d.get('fajl')})"})
 
     # 5. Чеклистът — кой ред кои файлове доказват.
+    # Четене отпреди промяна в чеклиста може да сочи ред, който вече го няма
+    # (16.09.2026: „Становища за СКО и СВО“ стана два реда) — не се предлага.
+    try:
+        segashni = set(_redove_za_faza(ag["faza"]))
+    except Exception:
+        segashni = None
+    staro = lambda d: bool(d.get("cheklist_red")) and segashni is not None and d["cheklist_red"] not in segashni
     po_red = {}
     for d in dokumenti:
         r = d.get("cheklist_red")
-        if not r:
+        if not r or staro(d):
             continue
         e = po_red.setdefault(r, {"dokument": r, "nomer": "", "fajlove": [], "sken": False})
         e["fajlove"].append(d.get("fajl", ""))
@@ -649,7 +656,9 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
         "razminavania": razm,
         "hronologia": hron,
         "predlozhenie": sorted(po_red.values(), key=lambda e: e["dokument"]),
-        "bez_red": [d.get("fajl", "") for d in dokumenti if not d.get("cheklist_red")],
+        "bez_red": [d.get("fajl", "") + (f" (старо четене — редът „{d['cheklist_red']}“ вече го няма, прочети наново)"
+                                         if staro(d) else "")
+                    for d in dokumenti if not d.get("cheklist_red") or staro(d)],
         "cheklist": cheklist,
         "dokumenti": len(dokumenti),
         "ot_skan": sum(bool(d.get("sken")) for d in dokumenti),
