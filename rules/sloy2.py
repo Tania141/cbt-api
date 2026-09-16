@@ -311,6 +311,9 @@ def shema_dokument(cheklist_redove):
             "nomer": _fakt("номерът на документа (без датата)"),
             "data": _fakt("датата на съставяне или издаване, дд.мм.гггг"),
             "izdatel": _fakt("кой го е издал или съставил"),
+            # Акт обр. 7 / 12 — кой акт кой е в таблицата за сверяване (16.09.2026).
+            "sadarzhanie": _fakt("САМО при акт обр. 7 или обр. 12: какво е прието — елементът и котата, "
+                                 "кратко, напр. „фундаментна плоча, к. -1,92“"),
             # Декларации и сертификати за материали — за таблицата в ОД
             # (Материал/изделие · Производител/Доставчик · Вид · Дата), 16.09.2026.
             "material": _fakt("САМО при декларация/сертификат за строителен продукт: материалът или "
@@ -432,7 +435,7 @@ def _normalizirai(dok):
             return v
         return {"stoynost": "" if v is None else str(v)}
 
-    for k in ("nomer", "data", "izdatel", "material", "proizvoditel"):
+    for k in ("nomer", "data", "izdatel", "material", "proizvoditel", "sadarzhanie"):
         if k in dok:
             dok[k] = fakt(dok[k])
     o = dok.get("obekt")
@@ -466,7 +469,7 @@ def _normalizirai(dok):
 
 
 def _sveri_vsichko(dok, stranici, sken):
-    for k in ("nomer", "data", "izdatel", "material", "proizvoditel"):
+    for k in ("nomer", "data", "izdatel", "material", "proizvoditel", "sadarzhanie"):
         _sveri(dok.get(k), stranici, sken)
     for f in (dok.get("obekt") or {}).values():
         _sveri(f, stranici, sken)
