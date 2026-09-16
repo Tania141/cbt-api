@@ -25,6 +25,19 @@ class NeMozheSega(Exception):
     Опитва се следващият. Грешка в самия файл НЕ е такава — тя е NeSeChete."""
 
 
+def _razcheti_spisak(tekst):
+    """Списък, върнат като текст → списък, ако поне началото е цял JSON масив."""
+    t = str(tekst or "").strip()
+    i = t.find("[")
+    if i < 0:
+        return None
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(t[i:])   # излишното след масива — без значение
+    except ValueError:
+        return None
+    return obj if isinstance(obj, list) else None
+
+
 # ── Claude ────────────────────────────────────────────────────────────────────
 
 def _claude_ne_mozhe(e):
@@ -52,24 +65,44 @@ class Claude:
         """→ (документ, {model, tokens_in, tokens_out}). Claude вижда самите
         страници (`prep["blokove"]`), затова суровият файл не му трябва."""
         import anthropic
-        try:
-            r = anthropic.Anthropic(api_key=self.api_key).messages.create(
-                # Серия от 11 акта обр. 7 в един файл не се побира в 4000.
-                model=self.model, max_tokens=16000,
-                tools=[{"name": "zapishi_dokument",
-                        "description": "Записва прочетеното от документа.",
-                        "input_schema": shema}],
-                tool_choice={"type": "tool", "name": "zapishi_dokument"},
-                messages=[{"role": "user",
-                           "content": prep["blokove"] + [{"type": "text", "text": tekst}]}],
-            )
-        except anthropic.APIError as e:
-            if _claude_ne_mozhe(e):
-                raise NeMozheSega(str(e)) from e
-            raise
-        dok = next((b.input for b in r.content if getattr(b, "type", "") == "tool_use"), None)
-        return dok, {"model": getattr(r, "model", self.model),
-                     "tokens_in": r.usage.input_tokens, "tokens_out": r.usage.output_tokens}
+        tin = tout = 0
+        # 16.09.2026 (ел.измервания): Claude понякога връща „dokumenti“ като
+        # ТЕКСТ, при това повреден. Опитва се да се разчете; не стане ли —
+        # още едно питане с изрична бележка, преди да се откаже.
+        for opit in range(2):
+            dopalnenie = ("" if opit == 0 else
+                          "\n\nВАЖНО: „dokumenti“ трябва да е масив от обекти, НЕ текст с JSON вътре.")
+            try:
+                r = anthropic.Anthropic(api_key=self.api_key).messages.create(
+                    # Серия от 11 акта обр. 7 в един файл не се побира в 4000.
+                    model=self.model, max_tokens=16000,
+                    tools=[{"name": "zapishi_dokument",
+                            "description": "Записва прочетеното от документа.",
+                            "input_schema": shema}],
+                    tool_choice={"type": "tool", "name": "zapishi_dokument"},
+                    messages=[{"role": "user",
+                               "content": prep["blokove"] + [{"type": "text", "text": tekst + dopalnenie}]}],
+                )
+            except anthropic.APIError as e:
+                if _claude_ne_mozhe(e):
+                    raise NeMozheSega(str(e)) from e
+                raise
+            tin += r.usage.input_tokens
+            tout += r.usage.output_tokens
+            dok = next((b.input for b in r.content if getattr(b, "type", "") == "tool_use"), None)
+            if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), str):
+                razcheten = _razcheti_spisak(dok["dokumenti"])
+                if razcheten is not None:
+                    dok = {**dok, "dokumenti": razcheten}
+            if not (isinstance(dok, dict) and isinstance(dok.get("dokumenti"), str)):
+                break
+            if getattr(r, "stop_reason", "") == "max_tokens":
+                break                           # прекъснат — второ питане няма да помогне
+        info = {"model": getattr(r, "model", self.model), "tokens_in": tin, "tokens_out": tout}
+        if getattr(r, "stop_reason", "") == "max_tokens" and isinstance(dok, dict) \
+                and isinstance(dok.get("dokumenti"), str):
+            dok = {"dokumenti": None, "_prekasnat": True}
+        return dok, info
 
 
 # ── Mistral ───────────────────────────────────────────────────────────────────

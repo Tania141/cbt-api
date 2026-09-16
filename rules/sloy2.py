@@ -418,11 +418,15 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od"):
     # документ направо или голия списък.
     # 16.09.2026: Claude понякога връща списъка като ТЕКСТ („[{…}]“) — тогава
     # обвивката се приемаше за документ и стр.линия_* излязоха празни („?“, 0 от 0).
+    if isinstance(dok, dict) and dok.get("_prekasnat"):
+        raise NeSeChete(f"{chetec.ime}: отговорът е прекъснат — файлът е твърде дълъг за едно четене; "
+                        f"раздели го на по-малки части")
     if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), str):
         try:
             dok = {**dok, "dokumenti": json.loads(dok["dokumenti"])}
         except ValueError:
-            raise NeSeChete(f"{chetec.ime} върна списъка повреден — прочети файла пак")
+            raise NeSeChete(f"{chetec.ime} върна списъка повреден и при втория опит — прочети файла пак "
+                            f"или избери „Само Mistral“")
     if isinstance(dok, dict) and "dokumenti" in dok and not isinstance(dok["dokumenti"], list):
         raise NeSeChete(f"{chetec.ime} не върна списък с документи — прочети файла пак")
     if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), list):
