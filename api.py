@@ -29,7 +29,9 @@ from cbt_docx import (
 )
 
 app = Flask(__name__)
-CORS(app, origins="*")
+# Заглавките, които PWA-то чете от отговор с файл, трябва да са изброени —
+# иначе браузърът ги крие.
+CORS(app, origins="*", expose_headers=["X-Dropbox-URL", "X-Doklad-Belezhki"])
 
 DATABASE_URL          = os.environ.get("DATABASE_URL", "")
 JWT_SECRET            = os.environ.get("JWT_SECRET", "change-me-in-production")
@@ -1195,6 +1197,51 @@ def generate_document(doc_type):
                         "hint": f"Постави шаблона в папка: {LOCAL_TEMPLATES_DIR}"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/generate-od-ai", methods=["POST"])
+@require_auth
+def generate_od_ai():
+    """Окончателният доклад СЪС слой 2 — отделна опция (операторът, 16.09.2026).
+
+    Обикновеното генериране (/api/generate/doklad — само паспорт и {{…}}) не
+    се пипа. Тук същият шаблон и същите полета, а отгоре — потвърденото с
+    хартията от прочетените документи. При разлика с паспорта редът остава с
+    точки; причините идват в заглавката X-Doklad-Belezhki, не в доклада.
+    """
+    import urllib.parse
+    from rules import doklad_sloy2
+    tenant_id = request.current_user.get("tenant_id")
+    body = request.get_json() or {}
+    if "passport" not in body:
+        return jsonify({"error": "Липсва поле 'passport'"}), 400
+    d = rows_to_dict(body["passport"])
+    pi = str(body.get("pi", "unknown"))
+    s2 = body.get("sloy2") or {}
+    try:
+        path = os.path.join(LOCAL_TEMPLATES_DIR, TEMPLATE_FILES["doklad"])
+        doc = Document(path)
+        fill_template(doc, build_placeholders(d))
+        rez = doklad_sloy2.za_doklad(s2.get("dokumenti") or [], s2.get("docDates") or {}, s2.get("zk") or {})
+        doklad_sloy2.zapishi(doc, rez)
+        buf = io.BytesIO(); doc.save(buf); buf.seek(0)
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        print(f"generate_od_ai: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+    popalneni = [k for k, v in rez["g11"].items() if v and (not isinstance(v, dict) or any(v.values()))]
+    log_action("generate_od_ai", user_id=request.current_user["sub"], tenant_id=tenant_id,
+               detail={"pi": pi, "g11_popalneni": popalneni,
+                       "spisatsi": {k: len(v) for k, v in rez["spisatsi"].items()},
+                       "prichini": rez["prichini"]})
+    response = send_file(buf, as_attachment=True,
+                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                         download_name=f"doklad_AI_{pi}.docx")
+    response.headers["X-Doklad-Belezhki"] = urllib.parse.quote(json.dumps(
+        {"prichini": rez["prichini"], "popalneni": popalneni,
+         "spisatsi": {k: len(v) for k, v in rez["spisatsi"].items()}}, ensure_ascii=False))
+    return response
 
 
 @app.route("/api/izvori", methods=["GET"])
