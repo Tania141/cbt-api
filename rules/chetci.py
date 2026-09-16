@@ -88,12 +88,22 @@ class Mistral:
         self.api_key, self.model_ocr, self.model = api_key, model_ocr, model
 
     def _post(self, pat, body, timeout):
-        import httpx
-        try:
-            r = httpx.post(f"{MISTRAL_URL}{pat}", json=body, timeout=timeout,
-                           headers={"Authorization": f"Bearer {self.api_key}"})
-        except (httpx.TimeoutException, httpx.TransportError) as e:
-            raise NeMozheSega(f"Mistral не отговаря: {e}") from e
+        import httpx, time
+        # Безплатният план пуска ~1 заявка в секунда, а четенето е две една след
+        # друга (OCR → чат) — 16.09.2026 втората удари 429. Изчаква и опитва пак.
+        for opit in range(4):
+            try:
+                r = httpx.post(f"{MISTRAL_URL}{pat}", json=body, timeout=timeout,
+                               headers={"Authorization": f"Bearer {self.api_key}"})
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                raise NeMozheSega(f"Mistral не отговаря: {e}") from e
+            if r.status_code != 429 or opit == 3:
+                break
+            try:
+                chakai = float(r.headers.get("retry-after", ""))
+            except ValueError:
+                chakai = 2 ** (opit + 1)
+            time.sleep(min(chakai, 20))
         if r.status_code in (401, 402, 403, 408, 429) or r.status_code >= 500:
             raise NeMozheSega(f"Mistral {r.status_code}: {r.text[:300]}")
         if r.status_code >= 400:
