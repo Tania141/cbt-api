@@ -24,7 +24,7 @@
 Първият е за Акт 15 / окончателния доклад (операторът, 15.09.2026); ОСИП
 ще добави свой, без да пипа двигателя.
 """
-import base64, io, os, re
+import base64, io, json, os, re
 from datetime import date
 
 from .engine import parse_date, OK, WARN, UNKNOWN
@@ -416,6 +416,15 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od"):
         raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])
     # Отговорът е {"dokumenti": [...]}; разхлабен четец може да върне и един
     # документ направо или голия списък.
+    # 16.09.2026: Claude понякога връща списъка като ТЕКСТ („[{…}]“) — тогава
+    # обвивката се приемаше за документ и стр.линия_* излязоха празни („?“, 0 от 0).
+    if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), str):
+        try:
+            dok = {**dok, "dokumenti": json.loads(dok["dokumenti"])}
+        except ValueError:
+            raise NeSeChete(f"{chetec.ime} върна списъка повреден — прочети файла пак")
+    if isinstance(dok, dict) and "dokumenti" in dok and not isinstance(dok["dokumenti"], list):
+        raise NeSeChete(f"{chetec.ime} не върна списък с документи — прочети файла пак")
     if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), list):
         spisak = dok["dokumenti"]
     elif isinstance(dok, list):
@@ -425,8 +434,16 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od"):
     else:
         spisak = []
     spisak = [x for x in spisak if isinstance(x, dict)]
+
+    # Документ без вид и без нито една стойност не е прочетен — не се записва
+    # мълчаливо като такъв.
+    def _prazen(x):
+        stoy = lambda f: str((f or {}).get("stoynost") if isinstance(f, dict) else f or "").strip()
+        return (not str(x.get("vid") or "").strip() and not any(stoy(x.get(k)) for k in ("nomer", "data", "izdatel"))
+                and not x.get("uchastnici") and not x.get("pozovavania"))
+    spisak = [x for x in spisak if not _prazen(x)]
     if not spisak:
-        raise NeSeChete(f"{chetec.ime} не върна прочетеното")
+        raise NeSeChete(f"{chetec.ime} не извлече нищо от файла — прочети го пак")
 
     izhod, vidyani = [], set()
     for i, d in enumerate(spisak):
