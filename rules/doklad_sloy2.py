@@ -185,23 +185,32 @@ def _vpisvane(d):
     return ", ".join(ch)
 
 
+def _godina(d):
+    """Годината на акта — от датата, иначе от делото („353/2022“, „от 2022 г.“)."""
+    for kl in ("data", "nt_delo"):
+        v = _potv(d.get(kl)) or ""
+        m = re.search(r"(19|20)\d{2}", v)
+        if m:
+            return m.group(0)
+        m = re.search(r"/(\d{2})\b", v)
+        if m:
+            return "20" + m.group(1)
+    return None
+
+
 def _pal_zapis(d):
-    """Пълният запис за „Документи за собственост“ — само от сверени части."""
+    """Пълният запис за „Документи за собственост“ — във вида на оператора
+    (16.09.2026): „Нотариален акт №190, том ІІ, рег.№ 9392, дело № 353 от 2022 г.
+    на Нотариус ………, вписан в регистъра на НК под № 701“. Несвереното — точки."""
     if not _potv(d.get("nomer")):
         return None
-    t = f"Нотариален акт № {_potv(d.get('nomer'))}"
-    for kl, et in (("nt_tom", ", том "), ("nt_reg", ", рег. № "), ("nt_delo", ", дело № ")):
-        if _potv(d.get(kl)):
-            t += et + _potv(d.get(kl))
-    if _potv(d.get("data")):
-        t += f" от {_potv(d.get('data'))} г."
-    if _potv(d.get("nt_notarius")):
-        t += f" на нотариус {_potv(d.get('nt_notarius'))}"
-    vp = [et + _potv(d.get(kl)) for kl, et in (("vp_vh_reg", "вх. рег. № "), ("vp_akt", "акт "),
-                                               ("vp_tom", "том "), ("vp_delo", "дело № ")) if _potv(d.get(kl))]
-    if vp:
-        t += ", вписан в СВ с " + ", ".join(vp)
-    return t
+    tochki = "............................................."
+    p = lambda kl: _potv(d.get(kl)) or tochki
+    delo = re.split(r"\s*/\s*|\s+от\s+", _potv(d.get("nt_delo")) or "", maxsplit=1)[0] or tochki
+    godina = _godina(d) or "......"
+    return (f"Нотариален акт №{_potv(d.get('nomer'))}, том {p('nt_tom')}, рег.№ {p('nt_reg')}, "
+            f"дело № {delo} от {godina} г. на Нотариус {p('nt_notarius')}, "
+            f"вписан в регистъра на НК под № {p('nt_nk')}")
 
 
 def sobstvenost_ot_aktove(dokumenti):
