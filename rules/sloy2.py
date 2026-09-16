@@ -135,7 +135,8 @@ def podgotvi(ime, media_type, data_b64):
                 chasti.append(" | ".join(c.text for c in red.cells))
         tekst = "\n".join(chasti)
         return {"blokove": [{"type": "text", "text": f"Текстът на {ime}:\n\n{tekst[:150000]}"}],
-                "stranici": [tekst], "sken": False, "belezhka": ""}
+                "stranici": [tekst], "sken": False, "belezhka": "",
+                "n": 1, "docx_tekst": tekst[:150000]}
 
     import pymupdf
     if ext == ".pdf" or media_type == "application/pdf":
@@ -153,7 +154,7 @@ def podgotvi(ime, media_type, data_b64):
         else:
             blokove = _kartini(doc, min(n, MAX_STRANICI))
         return {"blokove": blokove, "stranici": [] if sken else stranici,
-                "sken": sken, "belezhka": belezhka}
+                "sken": sken, "belezhka": belezhka, "n": n}
 
     if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".bmp") \
             or (media_type or "").startswith("image/"):
@@ -162,7 +163,7 @@ def podgotvi(ime, media_type, data_b64):
         except Exception:
             raise NeSeChete("изображението не се отваря")
         return {"blokove": _kartini(doc, min(doc.page_count, MAX_STRANICI)),
-                "stranici": [], "sken": True, "belezhka": ""}
+                "stranici": [], "sken": True, "belezhka": "", "n": doc.page_count}
 
     raise NeSeChete(f"не чета файлове „{ext or media_type}“ — дай PDF, снимка или .docx")
 
@@ -286,25 +287,39 @@ def _sveri_vsichko(dok, stranici, sken):
                            else "цитатът не е намерен в текста — провери")
 
 
-def procheti(client, model, ime, media_type, data_b64, agenda="od"):
-    """Един файл → фактите му. Връща (документ, отговорът на API-то)."""
+class NikoyNeMozhe(Exception):
+    """Нито един четец не може да чете сега; `prichini` — по четец."""
+
+    def __init__(self, prichini):
+        super().__init__("; ".join(f"{k} — {v}" for k, v in prichini))
+        self.prichini = prichini
+
+
+def procheti(chetci, ime, media_type, data_b64, agenda="od"):
+    """Един файл → фактите му. Връща (документ, {chetec, model, tokens_in, tokens_out}).
+
+    `chetci` — по ред, основният първи (`chetci.nalichni()`). Следващият се пита
+    само ако предният „не може сега“; грешка в самия файл спира веднага.
+    """
+    from .chetci import NeMozheSega
     ag = AGENDI[agenda]
     prep = podgotvi(ime, media_type, data_b64)
     redove = _redove_za_faza(ag["faza"])
-    instrument = {"name": "zapishi_dokument",
-                  "description": "Записва прочетеното от документа.",
-                  "input_schema": shema(redove)}
     tekst = (UKAZANIE + f"\n\nФайл: {ime}\n\nРедове от чеклиста ({ag['zaglavie']}):\n"
              + "\n".join(f"- {r}" for r in redove))
-    response = client.messages.create(
-        model=model, max_tokens=4000,
-        tools=[instrument],
-        tool_choice={"type": "tool", "name": "zapishi_dokument"},
-        messages=[{"role": "user", "content": prep["blokove"] + [{"type": "text", "text": tekst}]}],
-    )
-    dok = next((b.input for b in response.content if getattr(b, "type", "") == "tool_use"), None)
+    raw = base64.b64decode(data_b64)
+    prichini, dok, info, chetec = [], None, {}, None
+    for chetec in chetci:
+        try:
+            dok, info = chetec.chete(prep, shema(redove), tekst, ime=ime, raw=raw,
+                                     n_stranici=MAX_STRANICI if prep.get("n", 0) > MAX_STRANICI else 0)
+            break
+        except NeMozheSega as e:
+            prichini.append((chetec.ime, str(e)[:300]))
+    else:
+        raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])
     if not isinstance(dok, dict):
-        raise NeSeChete("моделът не върна прочетеното")
+        raise NeSeChete(f"{chetec.ime} не върна прочетеното")
     # Кодът не вярва на списъците: непознатото става „друго“ / празно.
     if dok.get("vid_kod") not in VIDOVE:
         dok["vid_kod"] = "DRUGO"
@@ -313,10 +328,16 @@ def procheti(client, model, ime, media_type, data_b64, agenda="od"):
     for p in dok.get("pozovavania") or []:
         if p.get("vid_kod") not in VIDOVE:
             p["vid_kod"] = "DRUGO"
+    # Сверката е срещу истинския текстов слой на файла, не срещу разпознатото
+    # от OCR — иначе четецът би проверявал сам себе си.
     _sveri_vsichko(dok, prep["stranici"], prep["sken"])
     dok.update({"fajl": ime, "sken": prep["sken"], "belezhka": prep["belezhka"],
-                "model": getattr(response, "model", model)})
-    return dok, response
+                "model": info.get("model"), "chetec": chetec.ime,
+                # Резервният не отбелязва ръкопис (проба 15.09.2026: 0 от 16) —
+                # тогава всяка стойност от скан е за потвърждение.
+                "rakopis_nenadezhden": not chetec.rakopis_nadezhden,
+                "zashto_rezerven": "; ".join(f"{k}: {v}" for k, v in prichini)})
+    return dok, {**info, "chetec": chetec.ime}
 
 
 # ── Сравнението ──────────────────────────────────────────────────────────────

@@ -1278,31 +1278,34 @@ def cheklist_dokumenti():
 @app.route("/api/sloy2/chete", methods=["POST"])
 @require_auth
 def sloy2_chete():
-    if not ANTHROPIC_API_KEY:
-        return jsonify({"error": "ANTHROPIC_API_KEY не е конфигуриран"}), 503
-    from rules import sloy2
+    from rules import sloy2, chetci
+    nalichni = chetci.nalichni()
+    if not nalichni:
+        return jsonify({"error": "Няма настроен четец — нито ANTHROPIC_API_KEY, нито MISTRAL_API_KEY"}), 503
     body = request.get_json() or {}
     f = body.get("fajl") or {}
     agenda = body.get("agenda") or "od"
     if agenda not in sloy2.AGENDI:
         return jsonify({"greshka": f"непознат дневен ред „{agenda}“"})
     try:
-        dok, response = sloy2.procheti(anthropic.Anthropic(api_key=ANTHROPIC_API_KEY), AI_MODEL,
-                                       f.get("ime", ""), f.get("media_type", ""), f.get("data", ""),
-                                       agenda=agenda)
+        dok, info = sloy2.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
+                                   f.get("data", ""), agenda=agenda)
     except sloy2.NeSeChete as e:
         return jsonify({"greshka": str(e)})
-    except anthropic.APIError as e:
-        print(f"sloy2_chete: Claude API грешка за {f.get('ime')}: {e}", flush=True)
-        return jsonify({"error": f"Claude API грешка: {str(e)}"}), 502
+    except sloy2.NikoyNeMozhe as e:
+        print(f"sloy2_chete: никой четец не може за {f.get('ime')}: {e}", flush=True)
+        return jsonify({"error": f"Нито един четец не може да чете сега — {e}"}), 502
     except Exception as e:
         print(f"sloy2_chete: {type(e).__name__} за {f.get('ime')}: {e}", flush=True)
         return jsonify({"greshka": f"{type(e).__name__}: {e}"})
+    if dok.get("zashto_rezerven"):
+        print(f"sloy2_chete: резервен четец за {f.get('ime')} — {dok['zashto_rezerven']}", flush=True)
     log_action("sloy2_chete", user_id=request.current_user.get("sub"),
                tenant_id=request.current_user.get("tenant_id"),
-               model=getattr(response, "model", AI_MODEL),
-               tokens_in=response.usage.input_tokens, tokens_out=response.usage.output_tokens,
-               detail={"pi": body.get("pi"), "fajl": f.get("ime"), "agenda": agenda})
+               model=info.get("model"),
+               tokens_in=info.get("tokens_in"), tokens_out=info.get("tokens_out"),
+               detail={"pi": body.get("pi"), "fajl": f.get("ime"), "agenda": agenda,
+                       "chetec": info.get("chetec"), "zashto_rezerven": dok.get("zashto_rezerven")})
     return jsonify({"dokument": dok})
 
 
