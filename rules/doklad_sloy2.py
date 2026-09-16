@@ -134,12 +134,15 @@ def za_doklad(dokumenti, doc_dates=None, zk=None):
         izd = _potv(d.get("izdatel"))
         return " ".join(chasti) + (f", {izd}" if izd else "")
 
-    spisatsi = {"laboratorii": [], "deklaracii": [], "aktove": [], "stanovishta": []}
+    spisatsi = {"laboratorii": [], "aktove": [], "stanovishta": [], "v_drugi": []}
     nepotv = 0
     for d in dokumenti or []:
         kod = d.get("vid_kod")
-        kade = ("laboratorii" if kod == "IZMERVANE" else "deklaracii" if kod in ("DEKLARACIA", "ENERGIEN")
+        # Декларациите за материали са в отделна таблица (deklaracii_tablica);
+        # енергийният сертификат не е декларация за материал — отива в раздел В.
+        kade = ("laboratorii" if kod == "IZMERVANE"
                 else "aktove" if kod in ("AKT12",)
+                else "v_drugi" if kod == "ENERGIEN"          # само в раздел В, не при мрежите
                 else "stanovishta" if kod in ("STANOVISHTE", "PRISAEDINYAVANE") or _za_drug_stroezh(d)
                 else None)
         if not kade:
@@ -153,7 +156,100 @@ def za_doklad(dokumenti, doc_dates=None, zk=None):
     if nepotv:
         prichini.append(f"{nepotv} прочетени документа за т. 3 и раздел В не са влезли — "
                         f"номерът или датата им не е сверена с хартията.")
-    return {"g11": g11, "spisatsi": spisatsi, "prichini": prichini}
+    deklaracii, bel = deklaracii_tablica(dokumenti)
+    prichini += bel
+    return {"g11": g11, "spisatsi": spisatsi, "deklaracii": deklaracii, "prichini": prichini}
+
+
+# ── Таблицата на декларациите ────────────────────────────────────────────────
+# Решение на оператора (16.09.2026): ЕДНА таблица в „Декларации за
+# съответствие на вложените материали“ — Материал/изделие · Производител/
+# Доставчик · Вид (с №) · Дата на издаване. Шест доставки бетон по една
+# декларация са един ред с шест дати. Различно изписване не се слива — пита.
+
+KOLONI_DEKLARACII = ("Материал/изделие", "Производител/Доставчик",
+                     "Вид (Сертификат/Декларация/друго)", "Дата на издаване")
+
+
+def _kl(s):
+    return re.sub(r"[\W_]+", " ", str(s or "").lower()).strip()
+
+
+def deklaracii_tablica(dokumenti):
+    """Сверените декларации → (редове, бележки). Ред = материал+производител+№."""
+    grupi, nevlezli, belezhki = {}, 0, []
+    for d in dokumenti or []:
+        if d.get("vid_kod") != "DEKLARACIA":
+            continue
+        mat, dt_raw = _potv(d.get("material")), _potv(d.get("data"))
+        dt = n_data(dt_raw) if dt_raw else None
+        if not mat or not dt:
+            nevlezli += 1
+            continue
+        proizv = _potv(d.get("proizvoditel")) or _potv(d.get("izdatel")) or ""
+        nomer = _potv(d.get("nomer")) or ""
+        vid = str(d.get("vid") or "Декларация").strip()
+        vid_txt = f"{vid} № {nomer}" if nomer and nomer not in vid else vid
+        kl = (_kl(mat), _kl(proizv), n_nomer(nomer))
+        red = grupi.setdefault(kl, {"material": mat, "proizvoditel": proizv, "vid": vid_txt, "dati": set()})
+        red["dati"].add(dt)
+    po_nomer = {}
+    for (_, _, n), red in grupi.items():
+        if n:
+            po_nomer.setdefault(n, []).append(red)
+    for n, rs in po_nomer.items():
+        if len(rs) > 1:
+            belezhki.append(f"Декларация № {n}: изписана различно — "
+                            + " / ".join(f"„{x['material']}“, {x['proizvoditel'] or '—'}" for x in rs)
+                            + ". Не са слети — провери дали е един и същ материал.")
+    if nevlezli:
+        belezhki.append(f"Декларации: {nevlezli} не са влезли в таблицата — материалът или датата "
+                        f"не е сверена с хартията.")
+    redove = [{**r, "dati": ", ".join(_dd(x) for x in sorted(r["dati"])) + " г."} for r in grupi.values()]
+    redove.sort(key=lambda r: (r["material"].lower(), r["dati"]))
+    return redove, belezhki
+
+
+def vstavi_deklaracii(doc, redove, marker="{{ОДАИ_Декларации}}"):
+    """Таблица на мястото на маркера. Без редове — маркерът остава (излиза с точки)."""
+    if not redove:
+        return False
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Twips
+    par = next((p for p in doc.paragraphs if marker in p.text), None)
+    if par is None:
+        return False
+    shirini = (2600, 2300, 3200, 1765)                 # dxa, общо 9865 — колкото главата
+    tbl = doc.add_table(rows=1 + len(redove), cols=4)
+    t = tbl._tbl
+    tblPr = t.tblPr
+    granici = OxmlElement("w:tblBorders")
+    for strana in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        b = OxmlElement(f"w:{strana}")
+        for k, v in (("val", "single"), ("sz", "4"), ("space", "0"), ("color", "808080")):
+            b.set(qn(f"w:{k}"), v)
+        granici.append(b)
+    tblPr.append(granici)
+    stil = par.style
+    for i, red in enumerate([dict(zip(("material", "proizvoditel", "vid", "dati"), KOLONI_DEKLARACII))] + redove):
+        for j, kl in enumerate(("material", "proizvoditel", "vid", "dati")):
+            kl_ = tbl.rows[i].cells[j]
+            kl_.width = Twips(shirini[j])
+            p = kl_.paragraphs[0]
+            p.style = stil
+            run = p.add_run(str(red.get(kl) or "…………"))
+            if i == 0:
+                run.bold = True
+    if tbl.rows:
+        # заглавният ред се повтаря на всяка страница
+        trPr = tbl.rows[0]._tr.get_or_add_trPr()
+        h = OxmlElement("w:tblHeader")
+        h.set(qn("w:val"), "true")
+        trPr.append(h)
+    par._p.addprevious(t)
+    par._p.getparent().remove(par._p)
+    return True
 
 
 # ── Блоковете на шаблона „ОД с АИ“ (по ПЕТРАКИЕВ) ────────────────────────────
@@ -205,9 +301,8 @@ def blokove_od_ai(rez, d):
 
     if sp.get("stanovishta"):
         out["{{ОДАИ_Мрежи}}"] = red(sp["stanovishta"])
-        out["{{ОДАИ_В}}"] = red(sp["stanovishta"])
-    if sp.get("deklaracii"):
-        out["{{ОДАИ_Декларации}}"] = red(sp["deklaracii"])
+    if sp.get("stanovishta") or sp.get("v_drugi"):
+        out["{{ОДАИ_В}}"] = red((sp.get("stanovishta") or []) + (sp.get("v_drugi") or []))
     if sp.get("laboratorii"):
         out["{{ОДАИ_Изпитвания}}"] = red(sp["laboratorii"])
     return out

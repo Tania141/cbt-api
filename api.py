@@ -1227,6 +1227,8 @@ def generate_od_ai():
         repl = build_placeholders(d)
         repl["{{ОДАИ_ДО}}"] = repl.get("{{Възложител_Блок}}") or repl["{{ОДАИ_ДО}}"]
         repl.update(doklad_sloy2.blokove_od_ai(rez, d))
+        # Таблицата — преди заместването, за да не бъде маркерът сменен с точки.
+        doklad_sloy2.vstavi_deklaracii(doc, rez["deklaracii"])
         fill_template(doc, repl)
         # Техническото описание — едно за обекта, не копие от Акт 15.
         tehn = doklad_sloy2.vmukni_tehnichesko(doc, str(body.get("tehnichesko") or ""))
