@@ -354,6 +354,11 @@ def _normalizirai(dok):
         dok["obekt"] = {"adres": fakt(o)}      # неразделен — цял, като адрес
     else:
         dok["obekt"] = {}
+    # вложен списък, върнат като текст — разчита се, не се губи мълчаливо
+    from .chetci import _razcheti_spisak
+    for k in ("uchastnici", "pozovavania"):
+        if isinstance(dok.get(k), str):
+            dok[k] = _razcheti_spisak(dok[k]) or []
     dok["uchastnici"] = [
         {**u, **{k: fakt(u[k]) for k in ("ime", "eik", "predstavlyavan_ot", "adres") if k in u}}
         for u in (dok.get("uchastnici") or []) if isinstance(u, dict)]

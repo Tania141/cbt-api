@@ -65,44 +65,47 @@ class Claude:
         """→ (документ, {model, tokens_in, tokens_out}). Claude вижда самите
         страници (`prep["blokove"]`), затова суровият файл не му трябва."""
         import anthropic
-        tin = tout = 0
-        # 16.09.2026 (ел.измервания): Claude понякога връща „dokumenti“ като
-        # ТЕКСТ, при това повреден. Опитва се да се разчете; не стане ли —
-        # още едно питане с изрична бележка, преди да се откаже.
-        for opit in range(2):
-            dopalnenie = ("" if opit == 0 else
-                          "\n\nВАЖНО: „dokumenti“ трябва да е масив от обекти, НЕ текст с JSON вътре.")
-            try:
-                r = anthropic.Anthropic(api_key=self.api_key).messages.create(
-                    # Серия от 11 акта обр. 7 в един файл не се побира в 4000.
-                    model=self.model, max_tokens=16000,
-                    tools=[{"name": "zapishi_dokument",
-                            "description": "Записва прочетеното от документа.",
-                            "input_schema": shema}],
-                    tool_choice={"type": "tool", "name": "zapishi_dokument"},
-                    messages=[{"role": "user",
-                               "content": prep["blokove"] + [{"type": "text", "text": tekst + dopalnenie}]}],
-                )
-            except anthropic.APIError as e:
-                if _claude_ne_mozhe(e):
-                    raise NeMozheSega(str(e)) from e
-                raise
-            tin += r.usage.input_tokens
-            tout += r.usage.output_tokens
-            dok = next((b.input for b in r.content if getattr(b, "type", "") == "tool_use"), None)
-            if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), str):
-                razcheten = _razcheti_spisak(dok["dokumenti"])
-                if razcheten is not None:
-                    dok = {**dok, "dokumenti": razcheten}
-            if not (isinstance(dok, dict) and isinstance(dok.get("dokumenti"), str)):
-                break
-            if getattr(r, "stop_reason", "") == "max_tokens":
-                break                           # прекъснат — второ питане няма да помогне
-        info = {"model": getattr(r, "model", self.model), "tokens_in": tin, "tokens_out": tout}
-        if getattr(r, "stop_reason", "") == "max_tokens" and isinstance(dok, dict) \
-                and isinstance(dok.get("dokumenti"), str):
-            dok = {"dokumenti": None, "_prekasnat": True}
-        return dok, info
+        # 16.09.2026 (ел.измервания, два пъти подред): с един инструмент за целия
+        # списък Claude връщаше „dokumenti“ като повреден ТЕКСТ. `strict: true` би
+        # го изключило, но не се поддържа от claude-sonnet-4-6 (моделът по
+        # подразбиране; смяната му е решение на оператора). Затова: инструментът е
+        # за ЕДИН документ и Claude го вика по веднъж за всеки — паралелните
+        # извиквания са вградени, а плоският запис не се превръща в текст.
+        shema_edin = (shema.get("properties", {}).get("dokumenti", {}).get("items")
+                      if isinstance(shema, dict) else None) or shema
+        tekst += ("\n\nИзвикай инструмента „zapishi_dokument“ ПО ВЕДНЪЖ ЗА ВСЕКИ отделен документ във файла "
+                  "(серия от 11 акта = 11 извиквания), в реда на страниците.")
+        try:
+            r = anthropic.Anthropic(api_key=self.api_key).messages.create(
+                # Серия от 11 акта обр. 7 в един файл не се побира в 4000.
+                model=self.model, max_tokens=16000,
+                tools=[{"name": "zapishi_dokument",
+                        "description": "Записва прочетеното от ЕДИН документ. Вика се по веднъж за всеки документ.",
+                        "input_schema": shema_edin}],
+                tool_choice={"type": "tool", "name": "zapishi_dokument"},
+                messages=[{"role": "user",
+                           "content": prep["blokove"] + [{"type": "text", "text": tekst}]}],
+            )
+        except anthropic.APIError as e:
+            if _claude_ne_mozhe(e):
+                raise NeMozheSega(str(e)) from e
+            raise
+        info = {"model": getattr(r, "model", self.model),
+                "tokens_in": r.usage.input_tokens, "tokens_out": r.usage.output_tokens}
+        vhodove = [b.input for b in r.content if getattr(b, "type", "") == "tool_use"]
+        if getattr(r, "stop_reason", "") == "max_tokens":
+            # последното извикване е прекъснато — непълен документ не се записва
+            return {"dokumenti": None, "_prekasnat": True}, info
+        spisak = []
+        for v in vhodove:
+            # стар вид отговор (обвивка) — приема се и той
+            if isinstance(v, dict) and "dokumenti" in v:
+                d = v["dokumenti"]
+                d = _razcheti_spisak(d) if isinstance(d, str) else d
+                spisak.extend(d if isinstance(d, list) else [])
+            else:
+                spisak.append(v)
+        return {"dokumenti": spisak}, info
 
 
 # ── Mistral ───────────────────────────────────────────────────────────────────
