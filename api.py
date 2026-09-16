@@ -1229,6 +1229,7 @@ def generate_od_ai():
         repl.update(doklad_sloy2.blokove_od_ai(rez, d))
         # Таблицата — преди заместването, за да не бъде маркерът сменен с точки.
         doklad_sloy2.vstavi_deklaracii(doc, rez["deklaracii"])
+        doklad_sloy2.vstavi_sobstvenici(doc, rez["sobstvenici"])
         fill_template(doc, repl)
         # Техническото описание — едно за обекта, не копие от Акт 15.
         tehn = doklad_sloy2.vmukni_tehnichesko(doc, str(body.get("tehnichesko") or ""))
@@ -1377,7 +1378,7 @@ def sloy2_chete():
             return jsonify({"greshka": f"четецът „{izbor}“ не е настроен на сървъра — няма ключ за него"})
     try:
         dokumenti, info = sloy2.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
-                                         f.get("data", ""), agenda=agenda)
+                                         f.get("data", ""), agenda=agenda, stranici=body.get("stranici"))
         dok = dokumenti[0]
     except sloy2.NeSeChete as e:
         return jsonify({"greshka": str(e)})

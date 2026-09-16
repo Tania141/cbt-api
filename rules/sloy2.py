@@ -109,7 +109,56 @@ def _kartini(doc, n):
     return blokove
 
 
-def podgotvi(ime, media_type, data_b64):
+def _kratko(nomera):
+    """[1, 2, 3, 20] → „1–3, 20“"""
+    out, i = [], 0
+    while i < len(nomera):
+        j = i
+        while j + 1 < len(nomera) and nomera[j + 1] == nomera[j] + 1:
+            j += 1
+        out.append(str(nomera[i]) if i == j else f"{nomera[i]}–{nomera[j]}")
+        i = j + 1
+    return ", ".join(out)
+
+
+def _premapni(d, orig):
+    """Страниците на прочетеното (1…n от изрязания PDF) → истинските във файла."""
+    def m(s):
+        return orig[s - 1] if isinstance(s, int) and 1 <= s <= len(orig) else s
+    def po_fakti(obj):
+        if isinstance(obj, dict):
+            if "stranica" in obj:
+                obj["stranica"] = m(obj["stranica"])
+            for v in obj.values():
+                po_fakti(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                po_fakti(v)
+    po_fakti(d)
+    for k in ("stranica_ot", "stranica_do"):
+        if k in d:
+            d[k] = m(d[k])
+
+
+def razberi_stranici(tekst, n):
+    """„1-4, 20“ → [0, 1, 2, 3, 19] (от нула). Празно → None (целият файл)."""
+    tekst = str(tekst or "").strip()
+    if not tekst:
+        return None
+    izbor = []
+    for chast in re.split(r"[,;\s]+", tekst):
+        m = re.fullmatch(r"(\d+)(?:\s*[-–]\s*(\d+))?", chast)
+        if not m:
+            raise NeSeChete(f"не разбирам страниците „{chast}“ — пиши напр. 1-4, 20")
+        a, b = int(m.group(1)), int(m.group(2) or m.group(1))
+        izbor += [k - 1 for k in range(min(a, b), max(a, b) + 1) if 1 <= k <= n]
+    izbor = sorted(set(izbor))
+    if not izbor:
+        raise NeSeChete(f"избраните страници ги няма във файла (той е {n} стр.)")
+    return izbor
+
+
+def podgotvi(ime, media_type, data_b64, stranici=None):
     """Файлът → блокове за модела + текстът по страници за сверката.
 
     Връща {"blokove", "stranici", "sken", "belezhka"}. `stranici` е празен,
@@ -144,6 +193,18 @@ def podgotvi(ime, media_type, data_b64):
             doc = pymupdf.open(stream=raw, filetype="pdf")
         except Exception:
             raise NeSeChete("PDF-ът не се отваря")
+        # Само избраните страници (нотариалните актове са 106 стр. — токени).
+        # Номерата после се връщат към истинските във файла.
+        orig = None
+        izbor = razberi_stranici(stranici, doc.page_count)
+        if izbor is not None:
+            doc.select(izbor)
+            # garbage=4 — иначе картините на махнатите страници остават във
+            # файла (3 от 106 стр. излизаха пак 26 MB).
+            raw = doc.tobytes(garbage=4, deflate=True)
+            doc = pymupdf.open(stream=raw, filetype="pdf")
+            data_b64 = base64.b64encode(raw).decode()
+            orig = [k + 1 for k in izbor]
         n = doc.page_count
         stranici = [doc[i].get_text() for i in range(n)]
         sken = sum(len(s.strip()) for s in stranici) < 40 * max(n, 1)
@@ -153,8 +214,10 @@ def podgotvi(ime, media_type, data_b64):
                 "type": "base64", "media_type": "application/pdf", "data": data_b64}}]
         else:
             blokove = _kartini(doc, min(n, MAX_STRANICI))
+        if orig:
+            belezhka = (f"прочетени само страници {_kratko(orig)}" + (f"; {belezhka}" if belezhka else ""))
         return {"blokove": blokove, "stranici": [] if sken else stranici,
-                "sken": sken, "belezhka": belezhka, "n": n}
+                "sken": sken, "belezhka": belezhka, "n": n, "raw": raw, "orig": orig}
 
     if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".bmp") \
             or (media_type or "").startswith("image/"):
@@ -277,6 +340,21 @@ def shema_dokument(cheklist_redove):
                                 "stranica": {"type": "integer"},
                                 "citat": {"type": "string", "description": "буквално, до 150 знака"},
                             }, "required": ["vid_kod", "citat"]}},
+            # Нотариален акт — за таблицата на собствениците в ОД (16.09.2026).
+            "nt_tom": _fakt("САМО при нотариален акт: том на нотариалния акт"),
+            "nt_reg": _fakt("САМО при нотариален акт: регистров номер"),
+            "nt_delo": _fakt("САМО при нотариален акт: дело № (с годината, ако е написана)"),
+            "nt_notarius": _fakt("САМО при нотариален акт: нотариус — име и/или № в Нотариалната камара"),
+            "vp_vh_reg": _fakt("САМО при нотариален акт: вписване в Службата по вписванията — вх. рег. №"),
+            "vp_akt": _fakt("САМО при нотариален акт: вписване — акт №"),
+            "vp_tom": _fakt("САМО при нотариален акт: вписване — том"),
+            "vp_delo": _fakt("САМО при нотариален акт: вписване — дело № (с годината)"),
+            "razpredelenie": {"type": "array", "description":
+                              "САМО при нотариален акт: кои обекти на кой собственик — по запис за всяка група",
+                              "items": {"type": "object", "properties": {
+                                  "obekti": _fakt("обектите, буквално — напр. „Апартамент 1, 11, 14, ПГ2, Г2 и Г6“"),
+                                  "sobstvenici": _fakt("собствениците на тези обекти, буквално, разделени с „; “"),
+                              }, "required": ["obekti", "sobstvenici"]}},
             "podpisi": {"type": "object", "properties": {
                 "ima_podpisi": {"type": "boolean"},
                 "ima_pechat": {"type": "boolean"},
@@ -300,6 +378,7 @@ UKAZANIE = """Четеш документ от досието на строеж 
 - В „pozovavania“ впиши ВСЕКИ друг документ, споменат с номер или дата: разрешение за строеж, одобрени проекти, протоколи, актове, заповедна книга, договори, нотариални актове, становища. Ако един и същ документ е споменат два пъти с различни данни — впиши и двете.
 - „cheklist_red“ избери от дадения списък само ако документът наистина е такъв; иначе празно.
 - „vid_kod“ избирай по значението, дадено в схемата. Договор за присъединяване към електрическа или водопроводна мрежа (ДПЕРМ, договор със Софийска вода и др.) НЕ е договор за строителство.
+- При нотариален акт попълни данните на акта (nomer, data, nt_tom, nt_reg, nt_delo, nt_notarius), вписването в Службата по вписванията (vp_vh_reg, vp_akt, vp_tom, vp_delo — обикновено в печата на вписването) и „razpredelenie“ — кои обекти (апартаменти, гаражи, паркоместа, ателиета) на кой собственик остават. Всичко буквално.
 - При декларация или сертификат за строителен продукт попълни „material“ (материалът/изделието) и „proizvoditel“ (производител или доставчик) — буквално, както са написани; „nomer“ е номерът на декларацията, „data“ — датата на издаване.
 - „rolya“: възложител е собственикът/инвеститорът на строежа — той е и клиентът в договорите с ВиК и ЕРМ; строител е фирмата, която изпълнява строежа; надзор е консултантът.
 - „predmet“ и „za_drug_stroezh“: разрешение за ползване на външен кабел, уличен водопровод или канал е за ДРУГ строеж — неговите разрешения за строеж, протоколи и заповеди не са на сградата. Отбележи za_drug_stroezh = true.
@@ -363,9 +442,15 @@ def _normalizirai(dok):
         dok["obekt"] = {}
     # вложен списък, върнат като текст — разчита се, не се губи мълчаливо
     from .chetci import _razcheti_spisak
-    for k in ("uchastnici", "pozovavania"):
+    for k in ("uchastnici", "pozovavania", "razpredelenie"):
         if isinstance(dok.get(k), str):
             dok[k] = _razcheti_spisak(dok[k]) or []
+    for k in ("nt_tom", "nt_reg", "nt_delo", "nt_notarius", "vp_vh_reg", "vp_akt", "vp_tom", "vp_delo"):
+        if k in dok:
+            dok[k] = fakt(dok[k])
+    dok["razpredelenie"] = [
+        {**r, **{k: fakt(r[k]) for k in ("obekti", "sobstvenici") if k in r}}
+        for r in (dok.get("razpredelenie") or []) if isinstance(r, dict)]
     dok["uchastnici"] = [
         {**u, **{k: fakt(u[k]) for k in ("ime", "eik", "predstavlyavan_ot", "adres") if k in u}}
         for u in (dok.get("uchastnici") or []) if isinstance(u, dict)]
@@ -386,6 +471,11 @@ def _sveri_vsichko(dok, stranici, sken):
     for u in dok.get("uchastnici") or []:
         for k in ("ime", "eik", "predstavlyavan_ot", "adres"):
             _sveri(u.get(k), stranici, sken)
+    for k in ("nt_tom", "nt_reg", "nt_delo", "nt_notarius", "vp_vh_reg", "vp_akt", "vp_tom", "vp_delo"):
+        _sveri(dok.get(k), stranici, sken)
+    for r in dok.get("razpredelenie") or []:
+        for k in ("obekti", "sobstvenici"):
+            _sveri(r.get(k), stranici, sken)
     for p in dok.get("pozovavania") or []:
         if sken or not stranici:
             p["sverka"] = "от скан — потвърди"
@@ -403,7 +493,7 @@ class NikoyNeMozhe(Exception):
         self.prichini = prichini
 
 
-def procheti(chetci, ime, media_type, data_b64, agenda="od"):
+def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None):
     """Един файл → фактите му. Връща (документ, {chetec, model, tokens_in, tokens_out}).
 
     `chetci` — по ред, основният първи (`chetci.nalichni()`). Следващият се пита
@@ -411,11 +501,11 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od"):
     """
     from .chetci import NeMozheSega
     ag = AGENDI[agenda]
-    prep = podgotvi(ime, media_type, data_b64)
+    prep = podgotvi(ime, media_type, data_b64, stranici)
     redove = _redove_za_faza(ag["faza"])
     tekst = (UKAZANIE + f"\n\nФайл: {ime}\n\nРедове от чеклиста ({ag['zaglavie']}):\n"
              + "\n".join(f"- {r}" for r in redove))
-    raw = base64.b64decode(data_b64)
+    raw = prep.get("raw") or base64.b64decode(data_b64)
     prichini, dok, info, chetec = [], None, {}, None
     for chetec in chetci:
         try:
@@ -475,6 +565,8 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od"):
         # Сверката е срещу истинския текстов слой на файла, не срещу разпознатото
         # от OCR — иначе четецът би проверявал сам себе си.
         _sveri_vsichko(d, prep["stranici"], prep["sken"])
+        if prep.get("orig"):
+            _premapni(d, prep["orig"])          # след сверката — тя е по изрязания файл
         # Ключът на документа — за потвържденията. Файл с един документ пази
         # името си (старите потвърждения важат); серията — по страница.
         if len(spisak) == 1:

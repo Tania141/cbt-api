@@ -158,7 +158,81 @@ def za_doklad(dokumenti, doc_dates=None, zk=None):
                         f"номерът или датата им не е сверена с хартията.")
     deklaracii, bel = deklaracii_tablica(dokumenti)
     prichini += bel
-    return {"g11": g11, "spisatsi": spisatsi, "deklaracii": deklaracii, "prichini": prichini}
+    sobstvenici, sobstvenost, do, bel = sobstvenost_ot_aktove(dokumenti)
+    prichini += bel
+    return {"g11": g11, "spisatsi": spisatsi, "deklaracii": deklaracii, "sobstvenici": sobstvenici,
+            "sobstvenost": sobstvenost, "do": do, "prichini": prichini}
+
+
+# ── Собствеността: таблицата, списъкът, „ДО:“ ────────────────────────────────
+# Решение на оператора (16.09.2026): таблицата „обект → собственик → нот. акт“
+# е „най-трудоемка и за описване, и за прочитане“ — сглобява се от сверените
+# нотариални актове. Влиза само свереното; частично сверено — с точки.
+
+KOLONI_SOBSTVENICI = ("Обект", "Собственик", "Нот. акт, вписване по ЗС/ПВ, Служба по вписванията — гр. София")
+
+
+def _vpisvane(d):
+    """Кратко за колоната: вписването, а без него — самият нотариален акт."""
+    ch = []
+    for kl, et in (("vp_akt", "акт № "), ("vp_tom", "том "), ("vp_delo", "дело № ")):
+        if _potv(d.get(kl)):
+            ch.append(et + _potv(d.get(kl)))
+    if not ch:
+        for kl, et in (("nomer", "нот. акт № "), ("nt_tom", "том "), ("nt_delo", "дело № ")):
+            if _potv(d.get(kl)):
+                ch.append(et + _potv(d.get(kl)))
+    return ", ".join(ch)
+
+
+def _pal_zapis(d):
+    """Пълният запис за „Документи за собственост“ — само от сверени части."""
+    if not _potv(d.get("nomer")):
+        return None
+    t = f"Нотариален акт № {_potv(d.get('nomer'))}"
+    for kl, et in (("nt_tom", ", том "), ("nt_reg", ", рег. № "), ("nt_delo", ", дело № ")):
+        if _potv(d.get(kl)):
+            t += et + _potv(d.get(kl))
+    if _potv(d.get("data")):
+        t += f" от {_potv(d.get('data'))} г."
+    if _potv(d.get("nt_notarius")):
+        t += f" на нотариус {_potv(d.get('nt_notarius'))}"
+    vp = [et + _potv(d.get(kl)) for kl, et in (("vp_vh_reg", "вх. рег. № "), ("vp_akt", "акт "),
+                                               ("vp_tom", "том "), ("vp_delo", "дело № ")) if _potv(d.get(kl))]
+    if vp:
+        t += ", вписан в СВ с " + ", ".join(vp)
+    return t
+
+
+def sobstvenost_ot_aktove(dokumenti):
+    """→ (редове на таблицата, пълни записи, собственици за „ДО:“, бележки)"""
+    redove, zapisi, imena, belezhki = [], [], [], []
+    nesvereni_redove = nesvereni_aktove = 0
+    for d in dokumenti or []:
+        if d.get("vid_kod") != "NOT_AKT":
+            continue
+        z = _pal_zapis(d)
+        if z:
+            if z not in zapisi:
+                zapisi.append(z)
+        else:
+            nesvereni_aktove += 1
+        akt = _vpisvane(d) or "…………"
+        for r in d.get("razpredelenie") or []:
+            ob, sob = _potv(r.get("obekti")), _potv(r.get("sobstvenici"))
+            if not ob or not sob:
+                nesvereni_redove += 1
+                continue
+            redove.append({"obekt": ob, "sobstvenik": sob, "akt": akt})
+            for ime in re.split(r"\s*;\s*", sob):
+                if ime.strip() and ime.strip() not in imena:
+                    imena.append(ime.strip())
+    if nesvereni_redove:
+        belezhki.append(f"Собственици: {nesvereni_redove} реда не са влезли в таблицата — обектите или "
+                        f"собствениците не са сверени с хартията.")
+    if nesvereni_aktove:
+        belezhki.append(f"Документи за собственост: {nesvereni_aktove} нотариални акта без сверен номер — не са влезли.")
+    return redove, zapisi, ", ".join(imena), belezhki
 
 
 # ── Таблицата на декларациите ────────────────────────────────────────────────
@@ -211,6 +285,16 @@ def deklaracii_tablica(dokumenti):
 
 
 def vstavi_deklaracii(doc, redove, marker="{{ОДАИ_Декларации}}"):
+    return vstavi_tablica(doc, marker, KOLONI_DEKLARACII, ("material", "proizvoditel", "vid", "dati"),
+                          redove, (2600, 2300, 3200, 1765))
+
+
+def vstavi_sobstvenici(doc, redove, marker="{{ОДАИ_Собственици}}"):
+    return vstavi_tablica(doc, marker, KOLONI_SOBSTVENICI, ("obekt", "sobstvenik", "akt"),
+                          redove, (2800, 3300, 3765))
+
+
+def vstavi_tablica(doc, marker, koloni, klyuchove, redove, shirini):
     """Таблица на мястото на маркера. Без редове — маркерът остава (излиза с точки)."""
     if not redove:
         return False
@@ -220,8 +304,8 @@ def vstavi_deklaracii(doc, redove, marker="{{ОДАИ_Декларации}}"):
     par = next((p for p in doc.paragraphs if marker in p.text), None)
     if par is None:
         return False
-    shirini = (2600, 2300, 3200, 1765)                 # dxa, общо 9865 — колкото главата
-    tbl = doc.add_table(rows=1 + len(redove), cols=4)
+    # ширините са в dxa, общо 9865 — колкото главата
+    tbl = doc.add_table(rows=1 + len(redove), cols=len(koloni))
     t = tbl._tbl
     tblPr = t.tblPr
     granici = OxmlElement("w:tblBorders")
@@ -232,8 +316,8 @@ def vstavi_deklaracii(doc, redove, marker="{{ОДАИ_Декларации}}"):
         granici.append(b)
     tblPr.append(granici)
     stil = par.style
-    for i, red in enumerate([dict(zip(("material", "proizvoditel", "vid", "dati"), KOLONI_DEKLARACII))] + redove):
-        for j, kl in enumerate(("material", "proizvoditel", "vid", "dati")):
+    for i, red in enumerate([dict(zip(klyuchove, koloni))] + redove):
+        for j, kl in enumerate(klyuchove):
             kl_ = tbl.rows[i].cells[j]
             kl_.width = Twips(shirini[j])
             p = kl_.paragraphs[0]
@@ -305,6 +389,10 @@ def blokove_od_ai(rez, d):
         out["{{ОДАИ_В}}"] = red((sp.get("stanovishta") or []) + (sp.get("v_drugi") or []))
     if sp.get("laboratorii"):
         out["{{ОДАИ_Изпитвания}}"] = red(sp["laboratorii"])
+    if rez.get("sobstvenost"):
+        out["{{ОДАИ_Собственост}}"] = red(rez["sobstvenost"])
+    if rez.get("do"):
+        out["{{ОДАИ_ДО}}"] = rez["do"]
     return out
 
 
