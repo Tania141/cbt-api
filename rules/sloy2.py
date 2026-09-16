@@ -573,7 +573,7 @@ def _granici(spisak, n):
     return izhod
 
 
-def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None):
+def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None, edin=False):
     """Един файл → фактите му. Връща (документ, {chetec, model, tokens_in, tokens_out}).
 
     `chetci` — по ред, основният първи (`chetci.nalichni()`). Следващият се пита
@@ -609,8 +609,11 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None):
     # 1) Разделяне (16.09.2026): принуден да вика инструмента, Claude го вика
     #    веднъж — в първите 15 стр. на нотариалните актове имаше 7 акта, излезе 1.
     #    Затова първо само „кои документи и на кои страници“ — кратък списък.
+    # `edin=True` — PWA вече е разделило файла (/api/sloy2/razdeli) и праща един
+    # документ с неговите страници: тук без второ разделяне (16.09.2026 — осем
+    # питания в една заявка минаваха 5 мин. и връзката падаше: „Failed to fetch“).
     chasti = None
-    if raw[:4] == b"%PDF" and n_vidimi > 1:
+    if not edin and raw[:4] == b"%PDF" and n_vidimi > 1:
         dg, chg = pitai(prep, SHEMA_GRANICI, UKAZANIE_GRANICI + f"\n\nФайлът има {n_vidimi} страници.",
                         raw, n_str, edin_dokument=False)
         chasti = _granici(_razberi_otgovor(dg, chg.ime), n_vidimi)
@@ -622,6 +625,9 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None):
     if chasti is None:
         dok, chetec = pitai(prep, shema(redove), tekst, raw, n_str)
         spisak = [(d, prep, 0, chetec) for d in _razberi_otgovor(dok, chetec.ime)]
+        if edin and spisak:
+            spisak = spisak[:1]
+            spisak[0][0]["stranica_ot"], spisak[0][0]["stranica_do"] = 1, prep.get("n") or 1
     else:
         import pymupdf
         src = pymupdf.open(stream=raw, filetype="pdf")
@@ -663,7 +669,9 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None):
             _premapni(d, karta)
         # Ключът на документа — за потвържденията. Файл с един документ пази
         # името си (старите потвърждения важат); серията — по страница.
-        if len(spisak) == 1:
+        if edin and prep.get("orig"):
+            kl = f"{ime}#стр.{prep['orig'][0]}"      # част от файл — по първата ѝ страница
+        elif len(spisak) == 1:
             kl = ime
         else:
             s = d.get("stranica_ot")
@@ -679,6 +687,68 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None):
                   "zashto_rezerven": "; ".join(f"{k}: {v}" for k, v in prichini)})
         izhod.append(d)
     return izhod, {**info, "chetec": chetec.ime}
+
+
+def razdeli(chetci, ime, media_type, data_b64, stranici=None):
+    """Само разделяне: кои документи има във файла и на кои страници.
+
+    Връща ([{"stranici", "ot", "do", "vid"}], {chetec, model, tokens_in, tokens_out});
+    страниците са ИСТИНСКИТЕ номера във файла, готови за /api/sloy2/chete с edin.
+    Порции по MAX_STRANICI — таванът на едно четене не отрязва дълъг избор
+    (16.09.2026: „15-48“ → прочетени само 15 от 34).
+    """
+    from .chetci import NeMozheSega
+    prep = podgotvi(ime, media_type, data_b64, stranici)
+    raw = prep.get("raw") or base64.b64decode(data_b64)
+    n = prep.get("n") or 1
+    orig = prep.get("orig") or list(range(1, n + 1))
+    info = {"tokens_in": 0, "tokens_out": 0, "chetec": None}
+    if raw[:4] != b"%PDF" or n <= 1:
+        return [_chast(orig, "")], info
+
+    ostavashti, prichini = list(chetci), []
+    import pymupdf
+    src = pymupdf.open(stream=raw, filetype="pdf")
+    chasti = []                                            # (от, до, вид) в изрязаната номерация
+    for start in range(0, n, MAX_STRANICI):
+        end = min(start + MAX_STRANICI, n)
+        sub = pymupdf.open()
+        sub.insert_pdf(src, from_page=start, to_page=end - 1)
+        sraw = sub.tobytes(garbage=4, deflate=True)
+        sprep = podgotvi(ime, "application/pdf", base64.b64encode(sraw).decode())
+        tx = UKAZANIE_GRANICI + f"\n\nТази част има {end - start} страници."
+        if start:
+            tx += ("\nАко първата страница е ПРОДЪЛЖЕНИЕ на документ отпреди (без заглавие), дай за нея "
+                   "запис с вид „продължение“.")
+        for chetec in list(ostavashti):
+            try:
+                dg, i = chetec.chete(sprep, SHEMA_GRANICI, tx, ime=ime, raw=sraw, n_stranici=0, edin_dokument=False)
+                info["tokens_in"] += i.get("tokens_in") or 0
+                info["tokens_out"] += i.get("tokens_out") or 0
+                info["model"], info["chetec"] = i.get("model"), chetec.ime
+                break
+            except NeMozheSega as e:
+                prichini.append((chetec.ime, str(e)[:300]))
+                ostavashti.remove(chetec)
+        else:
+            raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])
+        spisak = _razberi_otgovor(dg, chetec.ime)
+        gr = _granici(spisak, end - start) or [(1, end - start)]
+        for a, b in gr:
+            vid = next((str(x.get("vid") or "") for x in spisak if str(x.get("stranica_ot")) == str(a)), "")
+            if start and a == 1 and "продълж" in vid.lower() and chasti:
+                chasti[-1] = (chasti[-1][0], b + start, chasti[-1][2])
+            else:
+                chasti.append((a + start, b + start, vid))
+    info["zashto_rezerven"] = "; ".join(f"{k}: {v}" for k, v in prichini)
+    return [_chast(orig[a - 1:b], vid) for a, b, vid in chasti], info
+
+
+def _chast(nomera, vid):
+    """Страниците на една част → запис за PWA; несвързани — изброени."""
+    svarzani = all(y == x + 1 for x, y in zip(nomera, nomera[1:]))
+    return {"stranici": (f"{nomera[0]}-{nomera[-1]}" if svarzani else ",".join(map(str, nomera))),
+            "ot": nomera[0], "do": nomera[-1], "vid": vid}
 
 
 # ── Сравнението ──────────────────────────────────────────────────────────────
