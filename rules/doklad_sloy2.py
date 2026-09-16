@@ -156,6 +156,91 @@ def za_doklad(dokumenti, doc_dates=None, zk=None):
     return {"g11": g11, "spisatsi": spisatsi, "prichini": prichini}
 
 
+# ── Техническото описание на строежа ─────────────────────────────────────────
+# Решение на оператора (16.09.2026): Акт 15 се мени, докато се пише ОД, но
+# описанието на строежа е едно и също — само документите се дописват. Затова не
+# се копира от Акт 15 в ОД, а се пази ВЕДНЪЖ в обекта и оттам го взимат двата
+# (засега — ОД с АИ). Тук: как се изрязва от готов Акт 15 и как се слага в ОД.
+
+NACHALO, KRAI = "===ТЕХНИЧЕСКО_НАЧАЛО===", "===ТЕХНИЧЕСКО_КРАЙ==="
+
+
+def izrezhi_tehnichesko(redove):
+    """Редовете на Акт 15 → текстът на описанието, дословно.
+
+    Между маркерите, ако ги има (Акт 15 от шаблона); иначе от „Строежът
+    представлява“ до „Въз основа на горните констатации“. None, ако не се намира.
+    """
+    redove = [str(r).rstrip() for r in redove]
+    ch = lambda r: _nachalo(r)
+    i = next((k for k, r in enumerate(redove) if ch(r) == NACHALO), None)
+    j = next((k for k, r in enumerate(redove) if ch(r) == KRAI), None)
+    if i is None or j is None or j <= i:
+        # Истинският Акт 15 на оператора (ДЖИХАТ): „1. По издадените строителни
+        # книжа…“ са документите (менят се); „2. По изпълнението на строежа:“ до
+        # „Въз основа…“ е описанието (не се мени). Шаблонът — „Строежът представлява“.
+        nach = re.compile(r"^(\d+\.\s*)?По изпълнението на строежа|^Строежът представлява")
+        i = next((k for k, r in enumerate(redove) if nach.match(ch(r))), None)
+        j = next((k for k, r in enumerate(redove) if ch(r).startswith("Въз основа на горните констатации")), None)
+        if i is None or j is None or j <= i:
+            return None
+        izrez = redove[i:j]
+        # „2. По изпълнението на строежа:“ е заглавие — в ОД си има свое („Б. По
+        # изпълнение на СМР:“), да не се повтаря.
+        if re.match(r"^(\d+\.\s*)?По изпълнението на строежа:?$", ch(izrez[0])):
+            izrez = izrez[1:]
+    else:
+        izrez = redove[i + 1:j]
+    # празни редове в началото и края — без тях
+    while izrez and not izrez[0].strip():
+        izrez.pop(0)
+    while izrez and not izrez[-1].strip():
+        izrez.pop()
+    return "\n".join(izrez) or None
+
+
+def redove_ot_fajl(ime, raw):
+    """.docx или PDF с текст → редове. Сканиран PDF → None (няма текст)."""
+    ext = ime.lower().rsplit(".", 1)[-1] if "." in ime else ""
+    import io
+    if ext == "docx":
+        from docx import Document
+        return [p.text for p in Document(io.BytesIO(raw)).paragraphs]
+    if ext == "pdf":
+        import pymupdf
+        d = pymupdf.open(stream=raw, filetype="pdf")
+        tekst = "\n".join(d[i].get_text() for i in range(d.page_count))
+        return tekst.split("\n") if len(tekst.strip()) > 40 * max(d.page_count, 1) else None
+    raise ValueError("дай Акт 15 като .docx или PDF с текст (стар .doc — запиши го като .docx)")
+
+
+def vmukni_tehnichesko(doc, tekst):
+    """Слага описанието между маркерите в ОД; маркерите и заместителят изчезват.
+    Без текст — шаблонът остава както е."""
+    if not (tekst or "").strip():
+        return False
+    from docx.text.paragraph import Paragraph
+    pars = list(doc.paragraphs)
+    i = next((k for k, p in enumerate(pars) if _nachalo(p.text) == NACHALO), None)
+    j = next((k for k, p in enumerate(pars) if _nachalo(p.text) == KRAI), None)
+    if i is None or j is None or j <= i:
+        return False
+    # Между маркерите има и истинско съдържание — в ОД заглавието „Б. По
+    # изпълнение на СМР:“ стои вътре. Сменя се САМО заместителят „[ … ]“;
+    # маркерите се махат, всичко друго остава.
+    zam = next((pars[k] for k in range(i + 1, j) if _nachalo(pars[k].text).startswith("[")), None)
+    if zam is None:
+        return False
+    redove = tekst.split("\n")
+    _pishi(zam, redove[0])
+    posleden = zam
+    for r in redove[1:]:
+        posleden = _sled(posleden, r)
+    for k in (j, i):
+        pars[k]._p.getparent().remove(pars[k]._p)
+    return True
+
+
 # ── Записване в .docx ─────────────────────────────────────────────────────────
 
 def _pishi(par, tekst):

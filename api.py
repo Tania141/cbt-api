@@ -1224,6 +1224,10 @@ def generate_od_ai():
         fill_template(doc, build_placeholders(d))
         rez = doklad_sloy2.za_doklad(s2.get("dokumenti") or [], s2.get("docDates") or {}, s2.get("zk") or {})
         doklad_sloy2.zapishi(doc, rez)
+        # Техническото описание — едно за обекта, не копие от Акт 15.
+        tehn = doklad_sloy2.vmukni_tehnichesko(doc, str(body.get("tehnichesko") or ""))
+        if not tehn:
+            rez["prichini"].append("Раздел Б: няма записано техническо описание на строежа — остава заместителят.")
         buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     except FileNotFoundError as e:
         return jsonify({"error": str(e)}), 404
@@ -1242,6 +1246,30 @@ def generate_od_ai():
         {"prichini": rez["prichini"], "popalneni": popalneni,
          "spisatsi": {k: len(v) for k, v in rez["spisatsi"].items()}}, ensure_ascii=False))
     return response
+
+
+@app.route("/api/tehnichesko-ot-akt15", methods=["POST"])
+@require_auth
+def tehnichesko_ot_akt15():
+    """Изрязва техническото описание от готов Акт 15 — дословно, без АИ."""
+    from rules import doklad_sloy2
+    body = request.get_json() or {}
+    f = body.get("fajl") or {}
+    try:
+        # Или файл, или готов текст (генерираният с АИ Акт 15) — изрязването е едно.
+        redove = (str(body["tekst"]).split("\n") if body.get("tekst")
+                  else doklad_sloy2.redove_ot_fajl(f.get("ime", ""), base64.b64decode(f.get("data", ""))))
+    except ValueError as e:
+        return jsonify({"greshka": str(e)})
+    except Exception as e:
+        return jsonify({"greshka": f"файлът не се отваря: {type(e).__name__}"})
+    if redove is None:
+        return jsonify({"greshka": "PDF-ът е сканиран — няма текст за изрязване. Дай .docx или постави текста."})
+    tekst = doklad_sloy2.izrezhi_tehnichesko(redove)
+    if not tekst:
+        return jsonify({"greshka": "не намирам описанието — нито маркерите, нито „Строежът представлява“ … "
+                                   "„Въз основа на горните констатации“"})
+    return jsonify({"tekst": tekst})
 
 
 @app.route("/api/izvori", methods=["GET"])
