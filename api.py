@@ -1287,6 +1287,13 @@ def sloy2_chete():
     agenda = body.get("agenda") or "od"
     if agenda not in sloy2.AGENDI:
         return jsonify({"greshka": f"непознат дневен ред „{agenda}“"})
+    # Операторът може да избере четеца в PWA (16.09.2026) — „auto“ е основният
+    # с резервен; изричен избор значи САМО той, без минаване на другия.
+    izbor = (body.get("chetec") or "auto").lower()
+    if izbor != "auto":
+        nalichni = [c for c in nalichni if c.kod == izbor]
+        if not nalichni:
+            return jsonify({"greshka": f"четецът „{izbor}“ не е настроен на сървъра — няма ключ за него"})
     try:
         dok, info = sloy2.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
                                    f.get("data", ""), agenda=agenda)

@@ -41,6 +41,7 @@ def _claude_ne_mozhe(e):
 
 
 class Claude:
+    kod = "claude"
     ime = "Claude"
     rakopis_nadezhden = True
 
@@ -79,6 +80,7 @@ _OBRAZI = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".w
 
 
 class Mistral:
+    kod = "mistral"
     ime = "Mistral (резервен)"
     rakopis_nadezhden = False
 
