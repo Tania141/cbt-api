@@ -174,16 +174,19 @@ def podgotvi(ime, media_type, data_b64):
 # „договор“ в „договор за строителство“ (16.09.2026, Mistral: ДПЕРМ и договорът
 # със Софийска вода).
 VIDOVE_OPISANIE = {
-    "RS": "разрешение за строеж, издадено от главния архитект",
+    "RS": "разрешение за строеж, издадено от главния архитект или главния инженер",
     "ODOBREN_PROEKT": "одобрен инвестиционен проект или решение/заповед за одобряването му",
-    "PROTOKOL2": "протокол обр. 2 или 2а за откриване на площадка и строителна линия и ниво",
-    "ZK": "заповедната книга или заповед, вписана в нея",
+    "PROTOKOL2": "САМО протокол обр. 2 или 2а за откриване на площадка и строителна линия и ниво; "
+                 "протокол обр. 16 на държавна приемателна комисия е DRUGO",
+    "ZK": "САМО заповедната книга на строежа или заповед, вписана в нея; заповед на РДНСК, ДНСК "
+          "или общината е DRUGO",
     "OBR3": "констативен акт обр. 3 (съответствие с строителните книжа и ПУП)",
     "AKT7": "акт обр. 7 за приемане на СМР по нива и елементи на конструкцията",
     "AKT12": "акт обр. 12 за скрити работи",
     "AKT14": "акт обр. 14 за приемане на конструкцията",
     "AKT15": "акт обр. 15 за установяване на завършването на строежа",
-    "UDOST_181": "удостоверение от общината по чл. 181 ЗУТ (груб строеж)",
+    "UDOST_181": "САМО удостоверение от общината по чл. 181 ЗУТ (груб строеж); удостоверение от "
+                 "кадастъра или геодезията е DRUGO",
     "NOT_AKT": "нотариален акт, право на строеж, документ за собственост",
     "DOGOVOR_STROITEL": "САМО договорът между възложителя и строителя за изпълнение на строежа",
     "DOGOVOR_NADZOR": "САМО договорът между възложителя и лицето, упражняващо строителен надзор",
@@ -219,6 +222,12 @@ def shema(cheklist_redove):
         "properties": {
             "vid": {"type": "string", "description": "заглавието на документа, както е написано"},
             "vid_kod": {"type": "string", "enum": vidove, "description": _opisanie_vidove()},
+            "predmet": {"type": "string", "description":
+                        "за какъв строеж е документът, буквално — напр. „Жилищна сграда“, "
+                        "„Нов уличен водопровод Ф160мм“, „Кабелна линия 1 kV“"},
+            "za_drug_stroezh": {"type": "boolean", "description":
+                                "true, ако предметът е ДРУГ строеж, а не самата сграда — външна мрежа, "
+                                "кабел, уличен водопровод или канал, трафопост; false за сградата"},
             "cheklist_red": {"type": "string", "enum": [""] + list(cheklist_redove),
                              "description": "редът от чеклиста, който документът доказва; празно, ако нито един"},
             "nomer": _fakt("номерът на документа (без датата)"),
@@ -270,6 +279,7 @@ UKAZANIE = """Четеш документ от досието на строеж 
 - „cheklist_red“ избери от дадения списък само ако документът наистина е такъв; иначе празно.
 - „vid_kod“ избирай по значението, дадено в схемата. Договор за присъединяване към електрическа или водопроводна мрежа (ДПЕРМ, договор със Софийска вода и др.) НЕ е договор за строителство.
 - „rolya“: възложител е собственикът/инвеститорът на строежа — той е и клиентът в договорите с ВиК и ЕРМ; строител е фирмата, която изпълнява строежа; надзор е консултантът.
+- „predmet“ и „za_drug_stroezh“: разрешение за ползване на външен кабел, уличен водопровод или канал е за ДРУГ строеж — неговите разрешения за строеж, протоколи и заповеди не са на сградата. Отбележи za_drug_stroezh = true.
 Запиши резултата с инструмента."""
 
 
@@ -495,12 +505,49 @@ def _razminavane(kakvo, grupi, tezhest="разминаване", obyasnenie=""):
             "stoynosti": sorted(grupi, key=lambda x: -len(x["izvori"]))}
 
 
+# Цели думи: „КАНАЛИЗАЦИОННИТЕ системи“ в договора със Софийска вода е
+# присъединяване на сградата, не уличен канал.
+_DRUG_STROEZH = re.compile(r"кабел\w*|трафопост\w*|\bКТП\b|външн\w*|уличн\w*|газопровод\w*|"
+                           r"топлопровод\w*|\bканал\b|\bводопровод\b", re.IGNORECASE)
+
+
+def _za_drug_stroezh(d):
+    """Документът за друг строеж ли е — външна мрежа, а не сградата."""
+    if d.get("za_drug_stroezh") is True:
+        return True
+    if d.get("za_drug_stroezh") is False:
+        return False
+    predmet = str(d.get("predmet") or "")
+    if re.search(r"сград", predmet, re.IGNORECASE):
+        return False
+    # Старо четене без полетата: само разрешение за ползване / строеж, чийто вид,
+    # предмет или файл говори за мрежа. Становище за СВО/СКО е за сградата.
+    if d.get("vid_kod") not in ("RS", "DRUGO", "PRISAEDINYAVANE") and not re.search(r"разрешение", str(d.get("vid") or ""), re.I):
+        return False
+    return bool(_DRUG_STROEZH.search(" ".join(str(d.get(k) or "") for k in ("vid", "fajl")) + " " + predmet))
+
+
+def _nyakolko(pole, st):
+    """Стойност с повече от един имот / УПИ."""
+    if pole == "identifikator":
+        return len(re.findall(r"\d{5}\.\d{1,5}\.\d{1,5}", st or "")) > 1
+    return len(re.findall(r"\b[IVXLCMХІ]+\s*[-–—]\s*\d+", (st or "").upper())) > 1
+
+
 def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, dnes=None):
     """Прочетените документи → разминавания, хронология, чеклист."""
     ag = AGENDI[agenda]
     pasport = pasport or {}
     dnes = dnes or date.today()
     razm = []
+
+    # Документ за ДРУГ строеж (външен кабел, уличен водопровод и канал) носи
+    # свои РС, протоколи и заповеди — сравнени със сградата, дават лъжлива
+    # тревога (16.09.2026, ДЖИХАТ: десет „разминавания“ от двете разрешения за
+    # ползване). Остава в чеклиста, но не се сравнява. Четецът го отбелязва;
+    # кодът го познава и сам — по предмет, вид и име на файла — за старите четения.
+    za_drug = [d for d in dokumenti if _za_drug_stroezh(d)]
+    dokumenti_vsichki, dokumenti = dokumenti, [d for d in dokumenti if not _za_drug_stroezh(d)]
 
     # 1. Един документ, различни номер или дата — от самия документ, от
     #    позоваванията в другите и от паспорта.
@@ -547,8 +594,10 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
     # 2. Обектът.
     for pole, norm, ime in (("identifikator", n_identifikator, "Идентификатор на имота"),
                             ("upi", n_upi, "УПИ")):
+        # Документ за няколко имота (улична мрежа по няколко УПИ) не е разминаване.
         t = [(_st((d.get("obekt") or {}).get(pole)),
-              _izvor(d, (d.get("obekt") or {}).get(pole), "самият документ")) for d in dokumenti]
+              _izvor(d, (d.get("obekt") or {}).get(pole), "самият документ")) for d in dokumenti
+             if not _nyakolko(pole, _st((d.get("obekt") or {}).get(pole)))]
         if pole == "identifikator" and pasport.get("identifikator"):
             t.append((pasport["identifikator"], _PASPORT))
         g = _grupiraj(t, norm)
@@ -635,7 +684,7 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
         segashni = None
     staro = lambda d: bool(d.get("cheklist_red")) and segashni is not None and d["cheklist_red"] not in segashni
     po_red = {}
-    for d in dokumenti:
+    for d in dokumenti_vsichki:
         r = d.get("cheklist_red")
         if not r or staro(d):
             continue
@@ -658,8 +707,9 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
         "predlozhenie": sorted(po_red.values(), key=lambda e: e["dokument"]),
         "bez_red": [d.get("fajl", "") + (f" (старо четене — редът „{d['cheklist_red']}“ вече го няма, прочети наново)"
                                          if staro(d) else "")
-                    for d in dokumenti if not d.get("cheklist_red") or staro(d)],
+                    for d in dokumenti_vsichki if not d.get("cheklist_red") or staro(d)],
         "cheklist": cheklist,
-        "dokumenti": len(dokumenti),
-        "ot_skan": sum(bool(d.get("sken")) for d in dokumenti),
+        "dokumenti": len(dokumenti_vsichki),
+        "ot_skan": sum(bool(d.get("sken")) for d in dokumenti_vsichki),
+        "drug_stroezh": [d.get("fajl", "") + (f" — {d['predmet']}" if d.get("predmet") else "") for d in za_drug],
     }
