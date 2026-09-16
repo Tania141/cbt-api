@@ -61,9 +61,13 @@ class Claude:
     def __init__(self, api_key, model):
         self.api_key, self.model = api_key, model
 
-    def chete(self, prep, shema, tekst, **_):
+    def chete(self, prep, shema, tekst, edin_dokument=True, **_):
         """→ (документ, {model, tokens_in, tokens_out}). Claude вижда самите
-        страници (`prep["blokove"]`), затова суровият файл не му трябва."""
+        страници (`prep["blokove"]`), затова суровият файл не му трябва.
+
+        `edin_dokument=False` — схемата е списък, който трябва да дойде с ЕДНО
+        извикване (разделянето на файла: вид + страници — кратко, не се поврежда).
+        """
         import anthropic
         # 16.09.2026 (ел.измервания, два пъти подред): с един инструмент за целия
         # списък Claude връщаше „dokumenti“ като повреден ТЕКСТ. `strict: true` би
@@ -71,16 +75,20 @@ class Claude:
         # подразбиране; смяната му е решение на оператора). Затова: инструментът е
         # за ЕДИН документ и Claude го вика по веднъж за всеки — паралелните
         # извиквания са вградени, а плоският запис не се превръща в текст.
-        shema_edin = (shema.get("properties", {}).get("dokumenti", {}).get("items")
-                      if isinstance(shema, dict) else None) or shema
-        tekst += ("\n\nИзвикай инструмента „zapishi_dokument“ ПО ВЕДНЪЖ ЗА ВСЕКИ отделен документ във файла "
-                  "(серия от 11 акта = 11 извиквания), в реда на страниците.")
+        if edin_dokument:
+            # 16.09.2026: принуден да вика инструмента, Claude го вика ВЕДНЪЖ — затова
+            # сериите се разделят предварително и тук винаги идва един документ.
+            shema_edin = (shema.get("properties", {}).get("dokumenti", {}).get("items")
+                          if isinstance(shema, dict) else None) or shema
+        else:
+            shema_edin = shema
         try:
             r = anthropic.Anthropic(api_key=self.api_key).messages.create(
                 # Серия от 11 акта обр. 7 в един файл не се побира в 4000.
                 model=self.model, max_tokens=16000,
                 tools=[{"name": "zapishi_dokument",
-                        "description": "Записва прочетеното от ЕДИН документ. Вика се по веднъж за всеки документ.",
+                        "description": ("Записва прочетеното от документа." if edin_dokument
+                                        else "Записва всички документи във файла наведнъж."),
                         "input_schema": shema_edin}],
                 tool_choice={"type": "tool", "name": "zapishi_dokument"},
                 messages=[{"role": "user",
@@ -98,7 +106,7 @@ class Claude:
             return {"dokumenti": None, "_prekasnat": True}, info
         spisak = []
         for v in vhodove:
-            # стар вид отговор (обвивка) — приема се и той
+            # обвивка — при разделянето, или стар вид отговор
             if isinstance(v, dict) and "dokumenti" in v:
                 d = v["dokumenti"]
                 d = _razcheti_spisak(d) if isinstance(d, str) else d
@@ -167,7 +175,7 @@ class Mistral:
         stranici = sorted(r.get("pages") or [], key=lambda p: p.get("index", 0))
         return [p.get("markdown", "") for p in stranici]
 
-    def chete(self, prep, shema, tekst, ime="", raw=b"", n_stranici=0):
+    def chete(self, prep, shema, tekst, ime="", raw=b"", n_stranici=0, **_):
         if prep.get("docx_tekst") is not None:
             stranici = [prep["docx_tekst"]]
         else:

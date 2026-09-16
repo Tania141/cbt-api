@@ -493,6 +493,86 @@ class NikoyNeMozhe(Exception):
         self.prichini = prichini
 
 
+SHEMA_GRANICI = {
+    "type": "object",
+    "properties": {"dokumenti": {"type": "array", "items": {"type": "object", "properties": {
+        "vid": {"type": "string", "description": "заглавието на документа, кратко"},
+        "stranica_ot": {"type": "integer", "description": "първата му страница във файла"},
+        "stranica_do": {"type": "integer", "description": "последната му страница във файла"},
+    }, "required": ["vid", "stranica_ot", "stranica_do"]}}},
+    "required": ["dokumenti"],
+}
+
+UKAZANIE_GRANICI = """Файлът е сканирано досие на строеж и може да съдържа НЯКОЛКО отделни документа един след друг — напр. няколко нотариални акта, серия актове обр. 7, договор и анекс.
+НЕ преписвай съдържание. Само раздели файла: за всеки отделен документ дай заглавието му и първата и последната му страница във файла. Нов документ обикновено започва със заглавие („НОТАРИАЛЕН АКТ“, „АКТ“, „ПРОТОКОЛ“, „ДОГОВОР“) и с номер 1 на страницата. Не пропускай нито един, дори да са почти еднакви. Ако целият файл е един документ — един запис.
+Запиши списъка с инструмента, с едно извикване."""
+
+
+def _razberi_otgovor(dok, ime_chetec):
+    """Отговорът на четеца → списък документи (празните — махнати)."""
+    # 16.09.2026: Claude понякога връща списъка като ТЕКСТ („[{…}]“) — тогава
+    # обвивката се приемаше за документ и стр.линия_* излязоха празни („?“, 0 от 0).
+    if isinstance(dok, dict) and dok.get("_prekasnat"):
+        raise NeSeChete(f"{ime_chetec}: отговорът е прекъснат — файлът е твърде дълъг за едно четене; "
+                        f"раздели го на по-малки части")
+    if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), str):
+        try:
+            dok = {**dok, "dokumenti": json.loads(dok["dokumenti"])}
+        except ValueError:
+            raise NeSeChete(f"{ime_chetec} върна списъка повреден — прочети файла пак "
+                            f"или избери „Само Mistral“")
+    if isinstance(dok, dict) and "dokumenti" in dok and not isinstance(dok["dokumenti"], list):
+        raise NeSeChete(f"{ime_chetec} не върна списък с документи — прочети файла пак")
+    if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), list):
+        spisak = dok["dokumenti"]
+    elif isinstance(dok, list):
+        spisak = dok
+    elif isinstance(dok, dict):
+        spisak = [dok]
+    else:
+        spisak = []
+
+    # Документ без вид и без нито една стойност не е прочетен — не се записва
+    # мълчаливо като такъв.
+    def _prazen(x):
+        stoy = lambda f: str((f or {}).get("stoynost") if isinstance(f, dict) else f or "").strip()
+        return (not str(x.get("vid") or "").strip() and not any(stoy(x.get(k)) for k in ("nomer", "data", "izdatel"))
+                and not x.get("uchastnici") and not x.get("pozovavania"))
+    return [x for x in spisak if isinstance(x, dict) and not _prazen(x)]
+
+
+def _granici(spisak, n):
+    """Отговорът на разделянето → [(от, до)], подредени, в рамките на файла.
+    Празнина между частите се слага към предната; нищо разумно → None."""
+    chasti = []
+    for x in spisak:
+        try:
+            a, b = int(x.get("stranica_ot")), int(x.get("stranica_do"))
+        except (TypeError, ValueError):
+            continue
+        a, b = max(1, min(a, n)), max(1, min(b, n))
+        if a > b:
+            a, b = b, a
+        chasti.append((a, b))
+    chasti = sorted(set(chasti))
+    izhod = []
+    for a, b in chasti:
+        if izhod and a <= izhod[-1][1]:             # застъпване — започва след предната
+            a = izhod[-1][1] + 1
+            if a > b:
+                continue
+        if izhod and a > izhod[-1][1] + 1:          # празнина — към предната част
+            izhod[-1] = (izhod[-1][0], a - 1)
+        izhod.append((a, b))
+    if not izhod:
+        return None
+    if izhod[0][0] > 1:
+        izhod[0] = (1, izhod[0][1])
+    if izhod[-1][1] < n:
+        izhod[-1] = (izhod[-1][0], n)
+    return izhod
+
+
 def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None):
     """Един файл → фактите му. Връща (документ, {chetec, model, tokens_in, tokens_out}).
 
@@ -506,53 +586,61 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None):
     tekst = (UKAZANIE + f"\n\nФайл: {ime}\n\nРедове от чеклиста ({ag['zaglavie']}):\n"
              + "\n".join(f"- {r}" for r in redove))
     raw = prep.get("raw") or base64.b64decode(data_b64)
-    prichini, dok, info, chetec = [], None, {}, None
-    for chetec in chetci:
-        try:
-            dok, info = chetec.chete(prep, shema(redove), tekst, ime=ime, raw=raw,
-                                     n_stranici=MAX_STRANICI if prep.get("n", 0) > MAX_STRANICI else 0)
-            break
-        except NeMozheSega as e:
-            prichini.append((chetec.ime, str(e)[:300]))
-    else:
-        raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])
-    # Отговорът е {"dokumenti": [...]}; разхлабен четец може да върне и един
-    # документ направо или голия списък.
-    # 16.09.2026: Claude понякога връща списъка като ТЕКСТ („[{…}]“) — тогава
-    # обвивката се приемаше за документ и стр.линия_* излязоха празни („?“, 0 от 0).
-    if isinstance(dok, dict) and dok.get("_prekasnat"):
-        raise NeSeChete(f"{chetec.ime}: отговорът е прекъснат — файлът е твърде дълъг за едно четене; "
-                        f"раздели го на по-малки части")
-    if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), str):
-        try:
-            dok = {**dok, "dokumenti": json.loads(dok["dokumenti"])}
-        except ValueError:
-            raise NeSeChete(f"{chetec.ime} върна списъка повреден и при втория опит — прочети файла пак "
-                            f"или избери „Само Mistral“")
-    if isinstance(dok, dict) and "dokumenti" in dok and not isinstance(dok["dokumenti"], list):
-        raise NeSeChete(f"{chetec.ime} не върна списък с документи — прочети файла пак")
-    if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), list):
-        spisak = dok["dokumenti"]
-    elif isinstance(dok, list):
-        spisak = dok
-    elif isinstance(dok, dict):
-        spisak = [dok]
-    else:
-        spisak = []
-    spisak = [x for x in spisak if isinstance(x, dict)]
+    ostavashti, prichini = list(chetci), []
+    info = {"tokens_in": 0, "tokens_out": 0}
 
-    # Документ без вид и без нито една стойност не е прочетен — не се записва
-    # мълчаливо като такъв.
-    def _prazen(x):
-        stoy = lambda f: str((f or {}).get("stoynost") if isinstance(f, dict) else f or "").strip()
-        return (not str(x.get("vid") or "").strip() and not any(stoy(x.get(k)) for k in ("nomer", "data", "izdatel"))
-                and not x.get("uchastnici") and not x.get("pozovavania"))
-    spisak = [x for x in spisak if not _prazen(x)]
+    def pitai(prep_x, sh, tx, raw_x, n_str, **kw):
+        """Питане с резерва: четец, който „не може сега“, отпада до края на файла."""
+        for chetec in list(ostavashti):
+            try:
+                dok, i = chetec.chete(prep_x, sh, tx, ime=ime, raw=raw_x, n_stranici=n_str, **kw)
+                info["tokens_in"] += i.get("tokens_in") or 0
+                info["tokens_out"] += i.get("tokens_out") or 0
+                info["model"] = i.get("model")
+                return dok, chetec
+            except NeMozheSega as e:
+                prichini.append((chetec.ime, str(e)[:300]))
+                ostavashti.remove(chetec)
+        raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])
+
+    n_str = MAX_STRANICI if prep.get("n", 0) > MAX_STRANICI else 0
+    n_vidimi = min(prep.get("n", 1), MAX_STRANICI)
+
+    # 1) Разделяне (16.09.2026): принуден да вика инструмента, Claude го вика
+    #    веднъж — в първите 15 стр. на нотариалните актове имаше 7 акта, излезе 1.
+    #    Затова първо само „кои документи и на кои страници“ — кратък списък.
+    chasti = None
+    if raw[:4] == b"%PDF" and n_vidimi > 1:
+        dg, chg = pitai(prep, SHEMA_GRANICI, UKAZANIE_GRANICI + f"\n\nФайлът има {n_vidimi} страници.",
+                        raw, n_str, edin_dokument=False)
+        chasti = _granici(_razberi_otgovor(dg, chg.ime), n_vidimi)
+        if chasti == [(1, n_vidimi)]:
+            chasti = None                       # един документ — обикновено четене
+
+    # 2) Четене — целият файл или всеки документ с неговите страници.
+    spisak = []                                  # (документ, prep, изместване, четец)
+    if chasti is None:
+        dok, chetec = pitai(prep, shema(redove), tekst, raw, n_str)
+        spisak = [(d, prep, 0, chetec) for d in _razberi_otgovor(dok, chetec.ime)]
+    else:
+        import pymupdf
+        src = pymupdf.open(stream=raw, filetype="pdf")
+        for ot, do in chasti:
+            sub = pymupdf.open()
+            sub.insert_pdf(src, from_page=ot - 1, to_page=do - 1)
+            sraw = sub.tobytes(garbage=4, deflate=True)
+            sprep = podgotvi(ime, "application/pdf", base64.b64encode(sraw).decode())
+            dok, chetec = pitai(sprep, shema(redove),
+                                tekst + f"\n\nТова е ЕДИН документ — страници {ot}–{do} от файла.", sraw, 0)
+            docs = _razberi_otgovor(dok, chetec.ime)[:1]        # един документ на част
+            for d in docs:
+                d["stranica_ot"], d["stranica_do"] = 1, do - ot + 1
+                spisak.append((d, sprep, ot - 1, chetec))
     if not spisak:
-        raise NeSeChete(f"{chetec.ime} не извлече нищо от файла — прочети го пак")
+        raise NeSeChete("четецът не извлече нищо от файла — прочети го пак")
 
     izhod, vidyani = [], set()
-    for i, d in enumerate(spisak):
+    for i, (d, prep_d, izmest, chetec) in enumerate(spisak):
         _normalizirai(d)
         # Кодът не вярва на списъците: непознатото става „друго“ / празно.
         if d.get("vid_kod") not in VIDOVE:
@@ -564,9 +652,15 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None):
                 p["vid_kod"] = "DRUGO"
         # Сверката е срещу истинския текстов слой на файла, не срещу разпознатото
         # от OCR — иначе четецът би проверявал сам себе си.
-        _sveri_vsichko(d, prep["stranici"], prep["sken"])
+        _sveri_vsichko(d, prep_d["stranici"], prep_d["sken"])
+        # След сверката (тя е по изрязаното): страница в частта → във файла,
+        # после избраните от оператора → истинските номера.
+        n_d = prep_d.get("n") or 1
+        karta = [izmest + k for k in range(1, n_d + 1)]
         if prep.get("orig"):
-            _premapni(d, prep["orig"])          # след сверката — тя е по изрязания файл
+            karta = [prep["orig"][x - 1] if 1 <= x <= len(prep["orig"]) else x for x in karta]
+        if izmest or prep.get("orig"):
+            _premapni(d, karta)
         # Ключът на документа — за потвържденията. Файл с един документ пази
         # името си (старите потвърждения важат); серията — по страница.
         if len(spisak) == 1:
@@ -577,7 +671,7 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None):
             if kl in vidyani:
                 kl = f"{kl}.{i + 1}"
         vidyani.add(kl)
-        d.update({"id": kl, "fajl": ime, "sken": prep["sken"], "belezhka": prep["belezhka"],
+        d.update({"id": kl, "fajl": ime, "sken": prep_d["sken"], "belezhka": prep["belezhka"],
                   "model": info.get("model"), "chetec": chetec.ime,
                   # Резервният не отбелязва ръкопис (проба 15.09.2026: 0 от 16) —
                   # тогава всяка стойност от скан е за потвърждение.
