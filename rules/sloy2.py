@@ -500,6 +500,10 @@ def n_data(s):
 def n_nomer(s):
     s = str(s or "").strip()
     s = re.split(r"\s*/\s*|\s+от\s+", s, maxsplit=1)[0]
+    # „Разрешение № 25“ и „25“ са един номер (16.09.2026, договорът със
+    # Софийска вода) — думите пред номера не са част от него.
+    s = re.sub(r"^((разрешение|договор|заповед|протокол|акт|удостоверение|становище|за|строеж)\s+)+",
+               "", s, flags=re.I)
     s = re.sub(r"^(№|No\.?|N)\s*", "", s, flags=re.I)
     return re.sub(r"[^0-9A-Za-zА-Яа-я-]", "", s).upper()
 
@@ -511,7 +515,9 @@ def n_upi(s):
 
 
 def n_identifikator(s):
-    m = re.search(r"\d{5}\.\d{1,5}\.\d{1,5}(?:\.\d+)*", str(s or ""))
+    # Само имотът: „68134.2817.5829.1“ е сградата В имот 68134.2817.5829 —
+    # същият имот, не разминаване (16.09.2026, скицата на сградата).
+    m = re.search(r"\d{5}\.\d{1,5}\.\d{1,5}", str(s or ""))
     return m.group(0) if m else ""
 
 
@@ -629,6 +635,12 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
         tvard["RS"]["data"].append((pasport.get("rs_data", ""), _PASPORT))
     if pasport.get("zk_nomer"):
         tvard["ZK"]["nomer"].append((pasport.get("zk_nomer", ""), _PASPORT))
+    # Датите на съставяне от паспорта — в сравнението и в хронологията
+    # (16.09.2026: без тях Протокол 2 липсваше и акт обр. 7 от 29.04.2022 мина).
+    for kod, kl in (("PROTOKOL2", "protokol2"), ("ZK", "zk_zaverka"), ("AKT14", "akt14"), ("AKT15", "akt15")):
+        v = (pasport.get("docDates") or {}).get(kl)
+        if isinstance(v, str) and v.strip():
+            tvard[kod]["data"].append((v, _PASPORT))
 
     # Разминаване е, когато ДРУГ източник (позоваване, паспорт) дава друга
     # стойност. Два отделни документа от „единичен“ вид без позоваване между тях
@@ -745,13 +757,18 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
             hron.append({"status": WARN, "tekst": f"Акт обр. 7 извън строителството — {t}. "
                                                    f"Ако датата е от скан, сравни с хартията."})
         if not izvan:
+            # ✓ само когато и двете граници са проверени — иначе ❔ и казва коя липсва.
             ot, do = min(x for _, x in akt7), max(x for _, x in akt7)
-            granici = " и ".join(g for g in (f"след Протокол 2 ({_dd(p2[0])})" if p2 else "",
-                                              f"не след Акт 14 ({_dd(a14[0])})" if a14 else "") if g)
-            hron.append({"status": OK if granici else UNKNOWN,
-                         "tekst": f"{len(akt7)} акта обр. 7 от {_dd(ot)} до {_dd(do)}"
-                                  + (f" — всички {granici}" if granici
-                                     else " — няма Протокол 2 и Акт 14, с които да се сравнят")})
+            granici = [g for g in (f"след Протокол 2 ({_dd(p2[0])})" if p2 else "",
+                                   f"не след Акт 14 ({_dd(a14[0])})" if a14 else "") if g]
+            lipsva = [ime for ime, x in (("Протокол 2", p2), ("Акт 14", a14)) if not x]
+            tekst = f"{len(akt7)} акта обр. 7 от {_dd(ot)} до {_dd(do)}"
+            if granici:
+                tekst += " — всички " + " и ".join(granici)
+            if lipsva:
+                tekst += (f". Не е проверено спрямо {' и '.join(lipsva)} — няма дата "
+                          f"(прочети документа или впиши датата в паспорта)")
+            hron.append({"status": UNKNOWN if lipsva else OK, "tekst": tekst})
 
     for d in dokumenti:
         x = n_data(_st(d.get("data")))
