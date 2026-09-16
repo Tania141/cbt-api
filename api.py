@@ -1295,8 +1295,9 @@ def sloy2_chete():
         if not nalichni:
             return jsonify({"greshka": f"четецът „{izbor}“ не е настроен на сървъра — няма ключ за него"})
     try:
-        dok, info = sloy2.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
-                                   f.get("data", ""), agenda=agenda)
+        dokumenti, info = sloy2.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
+                                         f.get("data", ""), agenda=agenda)
+        dok = dokumenti[0]
     except sloy2.NeSeChete as e:
         return jsonify({"greshka": str(e)})
     except sloy2.NikoyNeMozhe as e:
@@ -1312,8 +1313,9 @@ def sloy2_chete():
                model=info.get("model"),
                tokens_in=info.get("tokens_in"), tokens_out=info.get("tokens_out"),
                detail={"pi": body.get("pi"), "fajl": f.get("ime"), "agenda": agenda,
-                       "chetec": info.get("chetec"), "zashto_rezerven": dok.get("zashto_rezerven")})
-    return jsonify({"dokument": dok})
+                       "chetec": info.get("chetec"), "zashto_rezerven": dok.get("zashto_rezerven"),
+                       "dokumenti": len(dokumenti)})
+    return jsonify({"dokumenti": dokumenti, "dokument": dok})
 
 
 @app.route("/api/sloy2/sravni", methods=["POST"])

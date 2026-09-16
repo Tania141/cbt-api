@@ -216,11 +216,26 @@ def _fakt(opisanie):
 
 
 def shema(cheklist_redove):
+    """Един файл → списък документи. Серия актове обр. 7 във файл е 11 документа,
+    всеки със своята дата за сверяване (16.09.2026 — дотогава се виждаше само първият)."""
+    return {
+        "type": "object",
+        "properties": {"dokumenti": {
+            "type": "array", "minItems": 1,
+            "description": "по един запис за всеки отделен документ във файла, по реда на страниците",
+            "items": shema_dokument(cheklist_redove)}},
+        "required": ["dokumenti"],
+    }
+
+
+def shema_dokument(cheklist_redove):
     vidove = list(VIDOVE)
     return {
         "type": "object",
         "properties": {
             "vid": {"type": "string", "description": "заглавието на документа, както е написано"},
+            "stranica_ot": {"type": "integer", "description": "първата страница на този документ във файла"},
+            "stranica_do": {"type": "integer", "description": "последната страница на този документ във файла"},
             "vid_kod": {"type": "string", "enum": vidove, "description": _opisanie_vidove()},
             "predmet": {"type": "string", "description":
                         "за какъв строеж е документът, буквално — напр. „Жилищна сграда“, "
@@ -271,6 +286,7 @@ def shema(cheklist_redove):
 UKAZANIE = """Четеш документ от досието на строеж в България за окончателния доклад на строителния надзор.
 
 Задачата ти е само да ПРЕПИШЕШ какво пише — не да поправяш и не да съдиш.
+- Един файл може да съдържа НЯКОЛКО отделни документа — напр. серия актове обр. 7 по един на страница, или договор и анекс. Дай отделен запис в „dokumenti“ за ВСЕКИ, със „stranica_ot“ и „stranica_do“, и не пропускай нито един, дори да са почти еднакви. Страниците на фактите са номерата във файла.
 - Пиши стойностите точно както са в документа, с грешките им. Ако фирмата е изписана „ВАСИНВЕСТ-2001“, пиши така, дори да подозираш, че е „2021“. Разминаванията ги търси кодът след теб — поправката ги скрива.
 - Датата в „stoynost“ — във вида дд.мм.гггг; в „citat“ — както е написана.
 - Ако нещо го няма или не се чете — остави празно. Не допълвай по догадка.
@@ -398,27 +414,52 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od"):
             prichini.append((chetec.ime, str(e)[:300]))
     else:
         raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])
-    if not isinstance(dok, dict):
+    # Отговорът е {"dokumenti": [...]}; разхлабен четец може да върне и един
+    # документ направо или голия списък.
+    if isinstance(dok, dict) and isinstance(dok.get("dokumenti"), list):
+        spisak = dok["dokumenti"]
+    elif isinstance(dok, list):
+        spisak = dok
+    elif isinstance(dok, dict):
+        spisak = [dok]
+    else:
+        spisak = []
+    spisak = [x for x in spisak if isinstance(x, dict)]
+    if not spisak:
         raise NeSeChete(f"{chetec.ime} не върна прочетеното")
-    _normalizirai(dok)
-    # Кодът не вярва на списъците: непознатото става „друго“ / празно.
-    if dok.get("vid_kod") not in VIDOVE:
-        dok["vid_kod"] = "DRUGO"
-    if dok.get("cheklist_red") not in redove:
-        dok["cheklist_red"] = ""
-    for p in dok.get("pozovavania") or []:
-        if p.get("vid_kod") not in VIDOVE:
-            p["vid_kod"] = "DRUGO"
-    # Сверката е срещу истинския текстов слой на файла, не срещу разпознатото
-    # от OCR — иначе четецът би проверявал сам себе си.
-    _sveri_vsichko(dok, prep["stranici"], prep["sken"])
-    dok.update({"fajl": ime, "sken": prep["sken"], "belezhka": prep["belezhka"],
-                "model": info.get("model"), "chetec": chetec.ime,
-                # Резервният не отбелязва ръкопис (проба 15.09.2026: 0 от 16) —
-                # тогава всяка стойност от скан е за потвърждение.
-                "rakopis_nenadezhden": not chetec.rakopis_nadezhden,
-                "zashto_rezerven": "; ".join(f"{k}: {v}" for k, v in prichini)})
-    return dok, {**info, "chetec": chetec.ime}
+
+    izhod, vidyani = [], set()
+    for i, d in enumerate(spisak):
+        _normalizirai(d)
+        # Кодът не вярва на списъците: непознатото става „друго“ / празно.
+        if d.get("vid_kod") not in VIDOVE:
+            d["vid_kod"] = "DRUGO"
+        if d.get("cheklist_red") not in redove:
+            d["cheklist_red"] = ""
+        for p in d.get("pozovavania") or []:
+            if p.get("vid_kod") not in VIDOVE:
+                p["vid_kod"] = "DRUGO"
+        # Сверката е срещу истинския текстов слой на файла, не срещу разпознатото
+        # от OCR — иначе четецът би проверявал сам себе си.
+        _sveri_vsichko(d, prep["stranici"], prep["sken"])
+        # Ключът на документа — за потвържденията. Файл с един документ пази
+        # името си (старите потвърждения важат); серията — по страница.
+        if len(spisak) == 1:
+            kl = ime
+        else:
+            s = d.get("stranica_ot")
+            kl = f"{ime}#стр.{s}" if isinstance(s, int) else f"{ime}#{i + 1}"
+            if kl in vidyani:
+                kl = f"{kl}.{i + 1}"
+        vidyani.add(kl)
+        d.update({"id": kl, "fajl": ime, "sken": prep["sken"], "belezhka": prep["belezhka"],
+                  "model": info.get("model"), "chetec": chetec.ime,
+                  # Резервният не отбелязва ръкопис (проба 15.09.2026: 0 от 16) —
+                  # тогава всяка стойност от скан е за потвърждение.
+                  "rakopis_nenadezhden": not chetec.rakopis_nadezhden,
+                  "zashto_rezerven": "; ".join(f"{k}: {v}" for k, v in prichini)})
+        izhod.append(d)
+    return izhod, {**info, "chetec": chetec.ime}
 
 
 # ── Сравнението ──────────────────────────────────────────────────────────────
@@ -475,7 +516,7 @@ def _st(f):
 
 def _izvor(dok, f, rol):
     f = f if isinstance(f, dict) else {}
-    return {"fajl": dok.get("fajl", ""), "vid": dok.get("vid", ""), "rol": rol,
+    return {"fajl": dok.get("id") or dok.get("fajl", ""), "vid": dok.get("vid", ""), "rol": rol,
             "stranica": f.get("stranica"), "citat": f.get("citat", ""),
             "sverka": f.get("sverka", ""), "rakopisno": bool(f.get("rakopisno"))}
 
@@ -669,6 +710,32 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
         if v.status != UNKNOWN:
             hron.append({"status": v.status, "tekst": f"{r.code} {r.title}: {v.message}",
                          "citat": r.citation})
+    # Актовете обр. 7 — всеки след Протокол 2 и не след Акт 14 (операторът,
+    # 16.09.2026). Проверява се поотделно, за да се види кой акт е извън реда;
+    # грешно прочетена ръкописна дата (29.04 вместо 29.07.2022) излиза точно тук.
+    akt7 = [(d, n_data(_st(d.get("data")))) for d in dokumenti if d.get("vid_kod") == "AKT7"]
+    akt7 = [(d, x) for d, x in akt7 if x]
+    if akt7:
+        p2, a14 = naj.get("PROTOKOL2"), naj.get("AKT14")
+        izvan = []
+        for d, x in sorted(akt7, key=lambda t: t[1]):
+            kade = d.get("id") or d.get("fajl", "")
+            if p2 and x < p2[0]:
+                izvan.append(f"{kade}: {_dd(x)} — преди Протокол 2 ({_dd(p2[0])}, {p2[1]})")
+            if a14 and x > a14[0]:
+                izvan.append(f"{kade}: {_dd(x)} — след Акт 14 ({_dd(a14[0])}, {a14[1]})")
+        for t in izvan:
+            hron.append({"status": WARN, "tekst": f"Акт обр. 7 извън строителството — {t}. "
+                                                   f"Ако датата е от скан, сравни с хартията."})
+        if not izvan:
+            ot, do = min(x for _, x in akt7), max(x for _, x in akt7)
+            granici = " и ".join(g for g in (f"след Протокол 2 ({_dd(p2[0])})" if p2 else "",
+                                              f"не след Акт 14 ({_dd(a14[0])})" if a14 else "") if g)
+            hron.append({"status": OK if granici else UNKNOWN,
+                         "tekst": f"{len(akt7)} акта обр. 7 от {_dd(ot)} до {_dd(do)}"
+                                  + (f" — всички {granici}" if granici
+                                     else " — няма Протокол 2 и Акт 14, с които да се сравнят")})
+
     for d in dokumenti:
         x = n_data(_st(d.get("data")))
         if x and x > dnes:
@@ -689,7 +756,8 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
         if not r or staro(d):
             continue
         e = po_red.setdefault(r, {"dokument": r, "nomer": "", "fajlove": [], "sken": False})
-        e["fajlove"].append(d.get("fajl", ""))
+        if d.get("fajl", "") not in e["fajlove"]:
+            e["fajlove"].append(d.get("fajl", ""))
         e["sken"] = e["sken"] or bool(d.get("sken"))
         if not e["nomer"]:
             n, dt = _st(d.get("nomer")), n_data(_st(d.get("data")))

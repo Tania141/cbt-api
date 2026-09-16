@@ -54,7 +54,8 @@ class Claude:
         import anthropic
         try:
             r = anthropic.Anthropic(api_key=self.api_key).messages.create(
-                model=self.model, max_tokens=4000,
+                # Серия от 11 акта обр. 7 в един файл не се побира в 4000.
+                model=self.model, max_tokens=16000,
                 tools=[{"name": "zapishi_dokument",
                         "description": "Записва прочетеното от документа.",
                         "input_schema": shema}],
