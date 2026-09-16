@@ -270,6 +270,41 @@ def _sveri(fakt, stranici, sken):
         fakt["sverka"] = "цитатът не е намерен в текста — провери"
 
 
+def _normalizirai(dok):
+    """Нагласява отговор, който не следва схемата буквално.
+
+    Claude е принуден да попълни инструмента; Mistral получава схемата като
+    указание и понякога връща „обект“ като низ или факт като голо число
+    (16.09.2026: AttributeError: 'str' object has no attribute 'values').
+    Кодът не гадае смисъла — само прибира стойността на мястото ѝ.
+    """
+    def fakt(v):
+        if isinstance(v, dict):
+            return v
+        return {"stoynost": "" if v is None else str(v)}
+
+    for k in ("nomer", "data", "izdatel"):
+        if k in dok:
+            dok[k] = fakt(dok[k])
+    o = dok.get("obekt")
+    if isinstance(o, dict):
+        dok["obekt"] = {k: fakt(v) for k, v in o.items()}
+    elif o:
+        dok["obekt"] = {"adres": fakt(o)}      # неразделен — цял, като адрес
+    else:
+        dok["obekt"] = {}
+    dok["uchastnici"] = [
+        {**u, **{k: fakt(u[k]) for k in ("ime", "eik", "predstavlyavan_ot", "adres") if k in u}}
+        for u in (dok.get("uchastnici") or []) if isinstance(u, dict)]
+    dok["pozovavania"] = [
+        {**p, **{k: ("" if p.get(k) is None else str(p.get(k))) for k in ("nomer", "data", "citat", "opisanie")}}
+        for p in (dok.get("pozovavania") or []) if isinstance(p, dict)]
+    for k in ("vid", "zabelezhki", "cheklist_red", "vid_kod"):
+        if dok.get(k) is not None and not isinstance(dok.get(k), str):
+            dok[k] = str(dok[k])
+    return dok
+
+
 def _sveri_vsichko(dok, stranici, sken):
     for k in ("nomer", "data", "izdatel"):
         _sveri(dok.get(k), stranici, sken)
@@ -320,6 +355,7 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od"):
         raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])
     if not isinstance(dok, dict):
         raise NeSeChete(f"{chetec.ime} не върна прочетеното")
+    _normalizirai(dok)
     # Кодът не вярва на списъците: непознатото става „друго“ / празно.
     if dok.get("vid_kod") not in VIDOVE:
         dok["vid_kod"] = "DRUGO"
