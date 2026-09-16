@@ -95,6 +95,9 @@ STILOVI_SHABLONI = {
     # Заповедната книга мина на ръка (08.09.2026): книжен сгъв вместо две
     # колони, осем A5 страници в четивен ред. Виж КОНВЕНЦИЯ.md → Книжно тяло.
     "Zapovedna_Template.docx",
+    # ОД с АИ — по структурата на истинския ОД за ПЕТРАКИЕВ (16.09.2026),
+    # главата и стиловете — от Okonchatelen_Doklad_Template.
+    "Okonchatelen_Doklad_AI_Template.docx",
 }
 
 # Дългите документи, които се четат разлистени: там футърът НЕ е фирмен знак,
@@ -104,6 +107,7 @@ STILOVI_SHABLONI = {
 S_TEKUSHT_FUTAR = {
     "OSIP_Template.docx",
     "Okonchatelen_Doklad_Template.docx",
+    "Okonchatelen_Doklad_AI_Template.docx",
     "Akt_15_Template.docx",
     "Akt_16_Template.docx",
 }

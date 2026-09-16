@@ -1219,11 +1219,15 @@ def generate_od_ai():
     pi = str(body.get("pi", "unknown"))
     s2 = body.get("sloy2") or {}
     try:
-        path = os.path.join(LOCAL_TEMPLATES_DIR, TEMPLATE_FILES["doklad"])
+        # Шаблонът е по структурата на истинския ОД за ПЕТРАКИЕВ (16.09.2026);
+        # обикновеният доклад остава на Okonchatelen_Doklad_Template.
+        path = os.path.join(LOCAL_TEMPLATES_DIR, "Okonchatelen_Doklad_AI_Template.docx")
         doc = Document(path)
-        fill_template(doc, build_placeholders(d))
         rez = doklad_sloy2.za_doklad(s2.get("dokumenti") or [], s2.get("docDates") or {}, s2.get("zk") or {})
-        doklad_sloy2.zapishi(doc, rez)
+        repl = build_placeholders(d)
+        repl["{{ОДАИ_ДО}}"] = repl.get("{{Възложител_Блок}}") or repl["{{ОДАИ_ДО}}"]
+        repl.update(doklad_sloy2.blokove_od_ai(rez, d))
+        fill_template(doc, repl)
         # Техническото описание — едно за обекта, не копие от Акт 15.
         tehn = doklad_sloy2.vmukni_tehnichesko(doc, str(body.get("tehnichesko") or ""))
         if not tehn:
