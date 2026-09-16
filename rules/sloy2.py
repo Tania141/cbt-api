@@ -836,9 +836,49 @@ def _dd(d):
     return d.strftime("%d.%m.%Y")
 
 
+def _sabiraj_izvori(izvori):
+    """Еднакви източници от серия → един ред със страниците (16.09.2026: „Джихад
+    Ахмад Хамуд“ излизаше 11 пъти — по веднъж за всеки акт обр. 7)."""
+    grupi = {}
+    for i in izvori:
+        fajl = str(i.get("fajl") or "").split("#")[0]
+        kl = (fajl, i.get("rol"), _norm_tekst(i.get("citat")), i.get("sverka"))
+        grupi.setdefault(kl, []).append(i)
+    out = []
+    for (fajl, _, _, _), gr in grupi.items():
+        if len(gr) == 1:
+            out.append(gr[0])
+            continue
+        str_ = sorted({s for s in (x.get("stranica") for x in gr) if isinstance(s, int)})
+        out.append({**gr[0], "fajl": fajl, "stranica": _kratko(str_) if str_ else None, "broy": len(gr)})
+    return out
+
+
 def _razminavane(kakvo, grupi, tezhest="разминаване", obyasnenie=""):
+    for g in grupi:
+        g["izvori"] = _sabiraj_izvori(g["izvori"])
     return {"kakvo": kakvo, "tezhest": tezhest, "obyasnenie": obyasnenie,
-            "stoynosti": sorted(grupi, key=lambda x: -len(x["izvori"]))}
+            "stoynosti": sorted(grupi, key=lambda x: -sum(i.get("broy", 1) for i in x["izvori"]))}
+
+
+_ADRES_SLUZHEBNI = {"гр", "град", "ул", "улица", "бул", "булевард", "район", "р", "н", "ж", "к", "жк", "кв",
+                    "бл", "блок", "вх", "ет", "ап", "№", "no", "софия", "област", "община", "със", "и", "на"}
+
+
+def _slej_sadarzhashti(grupi):
+    """Адресите: кратък, чиито думи се съдържат в по-пълен, е същият адрес
+    („ул. Иван Сусанин 45В“ ⊂ „… ул. Иван Сусанин № 45В, вх. Б, ет. 5, ап. 36“)."""
+    dumi = lambda s: {w for w in re.findall(r"[0-9a-zа-я]+", str(s).lower()) if w not in _ADRES_SLUZHEBNI}
+    grupi = sorted(grupi, key=lambda g: -len(dumi(g["stoynost"])))
+    izhod = []
+    for g in grupi:
+        d = dumi(g["stoynost"])
+        cel = next((x for x in izhod if d and d <= dumi(x["stoynost"])), None)
+        if cel:
+            cel["izvori"] += g["izvori"]
+        else:
+            izhod.append(g)
+    return izhod
 
 
 # Цели думи: „КАНАЛИЗАЦИОННИТЕ системи“ в договора със Софийска вода е
@@ -861,6 +901,37 @@ def _za_drug_stroezh(d):
     if d.get("vid_kod") not in ("RS", "DRUGO", "PRISAEDINYAVANE") and not re.search(r"разрешение", str(d.get("vid") or ""), re.I):
         return False
     return bool(_DRUG_STROEZH.search(" ".join(str(d.get(k) or "") for k in ("vid", "fajl")) + " " + predmet))
+
+
+# Кодът не вярва на четеца за вида на позоваването (16.09.2026, нотариалните
+# актове с Mistral): „Заповед № РД-18-39/20.07.2011“ за кадастралната карта и
+# „Решение № 632 … 28.09.2017“ за ПУП-а излизаха като разрешение за строеж,
+# „Договор за банков кредит“ — като договор за строителство. Позоваване се
+# брои за такъв документ само ако цитатът го казва; иначе е „друго“.
+_VID_PO_CITAT = {
+    "RS": (r"разрешени\w*\s+за\s+строеж", r"за\s+ползване"),
+    "PROTOKOL2": (r"обр(\.|азец)?\s*2а?\b|протокол\s*№?\s*2а?\b|откриване\s+на\s+строителна\s+площадка", None),
+    "ZK": (r"заповедна\s+книга", None),
+    "AKT14": (r"(акт|обр(\.|азец)?)\D{0,15}\b14\b|приемане\s+на\s+(строителната\s+)?конструкцията", None),
+    "AKT15": (r"(акт|обр(\.|азец)?)\D{0,15}\b15\b|завършването\s+на\s+строежа", None),
+    "UDOST_181": (r"\b181\b", None),
+    "DOGOVOR_NADZOR": (r"надзор", r"кредит"),
+    "DOGOVOR_STROITEL": (r"строител|строително|смр\b|изпълнител", r"кредит|присъединяване|надзор|ипотек"),
+    "TEHN_PASPORT": (r"технически\s+паспорт", None),
+    "ENERGIEN": (r"енергийн", None),
+}
+
+
+def _vid_na_pozovavane(p):
+    kod = p.get("vid_kod")
+    pravilo = _VID_PO_CITAT.get(kod)
+    if not pravilo:
+        return kod
+    tekst = " ".join(str(p.get(k) or "") for k in ("citat", "opisanie")).lower()
+    da, ne = pravilo
+    if re.search(da, tekst, re.IGNORECASE) and not (ne and re.search(ne, tekst, re.IGNORECASE)):
+        return kod
+    return "DRUGO"
 
 
 def _nyakolko(pole, st):
@@ -894,7 +965,7 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
             tvard[k]["nomer"].append((_st(d.get("nomer")), _izvor(d, d.get("nomer"), "самият документ")))
             tvard[k]["data"].append((_st(d.get("data")), _izvor(d, d.get("data"), "самият документ")))
         for p in d.get("pozovavania") or []:
-            k2 = p.get("vid_kod")
+            k2 = _vid_na_pozovavane(p)
             if k2 in tvard and k2 != k:
                 izv = _izvor(d, p, "позоваване")
                 tvard[k2]["nomer"].append((p.get("nomer", ""), izv))
@@ -953,16 +1024,26 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
         for u in d.get("uchastnici") or []:
             eik = n_eik(_st(u.get("eik")))
             if eik:
-                po_eik.setdefault(eik, {"roli": set(), "u": []})
-                po_eik[eik]["roli"].add(u.get("rolya", ""))
+                po_eik.setdefault(eik, {"roli": [], "u": []})
+                po_eik[eik]["roli"].append(u.get("rolya", ""))
                 po_eik[eik]["u"].append((d, u))
     for x in list(pasport.get("vazlozhiteli") or []) + [pasport.get("stroitel") or {}]:
         eik = n_eik(x.get("eik"))
         if eik:
-            po_eik.setdefault(eik, {"roli": set(), "u": []})["u"].append((None, {
+            po_eik.setdefault(eik, {"roli": [], "u": []})["u"].append((None, {
                 "ime": x.get("ime", ""), "predstavlyavan_ot": x.get("predstavlyavan_ot", "")}))
     for eik, v in sorted(po_eik.items()):
-        roli = ", ".join(sorted(r for r in v["roli"] if r)) or "участник"
+        # Ролята по честота: рядката е вероятно грешка на четеца и се казва така
+        # (16.09.2026: ВАСИНВЕСТ — „възложител, строител“).
+        from collections import Counter
+        broi = Counter(r for r in v["roli"] if r).most_common()
+        if not broi:
+            roli = "участник"
+        elif len(broi) == 1:
+            roli = broi[0][0]
+        else:
+            roli = broi[0][0] + " (" + "; ".join(
+                f"в {n} {'документ' if n == 1 else 'документа'} — {r}" for r, n in broi[1:]) + ")"
         for pole, norm, ime, tezhest, obyasnenie in (
                 ("ime", n_ime, "Име", "разминаване", "едно и също ЕИК, различно изписване"),
                 ("predstavlyavan_ot", n_ime, "Представляван от", "да се провери",
@@ -973,6 +1054,8 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
                 st = _st(u.get(pole))
                 t.append((st, _PASPORT if d is None else _izvor(d, u.get(pole), "самият документ")))
             g = _grupiraj(t, norm)
+            if pole == "adres":
+                g = _slej_sadarzhashti(g)
             if len(g) > 1:
                 razm.append(_razminavane(f"{ime} — {roli}, ЕИК {eik}", g, tezhest, obyasnenie))
 
