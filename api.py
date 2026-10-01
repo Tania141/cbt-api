@@ -1365,6 +1365,56 @@ def cheklist_dokumenti():
     return jsonify({**rezultat, "priznaci": priznaci})
 
 
+# ── Записките по частите на проекта ──────────────────────────────────────────
+# Операторът, 01.10.2026: „вместо ние да измисляме топлата вода, най-добре е
+# системата да прочете проекта и да предложи каквото има за предлагане“.
+# Отделно от слой 2 за ОД — друга схема, друга цел; работещото не се пипа.
+
+@app.route("/api/zapiski/chete", methods=["POST"])
+@require_auth
+def zapiski_chete():
+    from rules import zapiski, chetci
+    nalichni = chetci.nalichni()
+    if not nalichni:
+        return jsonify({"error": "Няма настроен четец — нито ANTHROPIC_API_KEY, нито MISTRAL_API_KEY"}), 503
+    body = request.get_json() or {}
+    f = body.get("fajl") or {}
+    izbor = (body.get("chetec") or "auto").lower()
+    if izbor != "auto":
+        nalichni = [c for c in nalichni if c.kod == izbor]
+        if not nalichni:
+            return jsonify({"greshka": f"четецът „{izbor}“ не е настроен на сървъра — няма ключ за него"})
+    try:
+        z, info = zapiski.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
+                                   f.get("data", ""), stranici=body.get("stranici"))
+    except zapiski.NeSeChete as e:
+        return jsonify({"greshka": str(e)})
+    except zapiski.NikoyNeMozhe as e:
+        print(f"zapiski_chete: никой четец не може за {f.get('ime')}: {e}", flush=True)
+        return jsonify({"error": f"Нито един четец не може да чете сега — {e}"}), 502
+    except Exception as e:
+        print(f"zapiski_chete: {type(e).__name__} за {f.get('ime')}: {e}", flush=True)
+        return jsonify({"greshka": f"{type(e).__name__}: {e}"})
+    log_action("zapiski_chete", user_id=request.current_user["sub"],
+               tenant_id=request.current_user.get("tenant_id"),
+               detail={"fajl": f.get("ime"), "chast": z.get("chast_kod"),
+                       "ot_tekst": z.get("ot_tekst"), **{k: info.get(k) for k in ("chetec", "tokens_in", "tokens_out")}})
+    return jsonify({"zapiska": z, "info": info})
+
+
+@app.route("/api/zapiski/rezyume", methods=["POST"])
+@require_auth
+def zapiski_rezyume():
+    """Само код: сглобява прочетените части и показва къде не се връзват."""
+    from rules import zapiski
+    body = request.get_json() or {}
+    try:
+        return jsonify(zapiski.rezyume(body.get("zapiski") or [], vid=body.get("vid") or "sgrada"))
+    except Exception as e:
+        print(f"zapiski_rezyume: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"greshka": f"{type(e).__name__}: {e}"})
+
+
 # ── Слой 2: АИ-то чете документите, кодът ги сравнява ────────────────────────
 # Един файл на заявка: сканът на 15 страници се чете до минута, а PWA-то
 # показва хода файл по файл. Файлът не се пази — връщат се само фактите.
