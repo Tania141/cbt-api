@@ -86,10 +86,11 @@ def _s(opisanie, **ostanalo):
     return {"type": "string", "description": opisanie, **ostanalo}
 
 
+# ВАЖНО: това е САМАТА схема (input_schema), не описание на инструмент.
+# Четците (`chetci.py`) я обвиват сами — Claude я слага в `input_schema`,
+# Mistral в `json_schema.schema`. Подаден цял инструмент, Claude отговаря
+# „tools.0.custom.input_schema.type: Field required“ (01.10.2026).
 SHEMA = {
-    "name": "zapishi_zapiska",
-    "description": "Записва прочетеното от обяснителната записка по една част на проекта.",
-    "input_schema": {
         "type": "object",
         "properties": {
             "chast_kod": _s("коя част на проекта е записката", enum=list(CHASTI)),
@@ -187,7 +188,6 @@ SHEMA = {
             },
         },
         "required": ["chast_kod"],
-    },
 }
 
 
@@ -248,7 +248,9 @@ def procheti(chetci, ime, media_type, data_b64, stranici=None):
                                   n_stranici=MAX_STRANICI if prep.get("n", 0) > MAX_STRANICI else 0,
                                   edin_dokument=True)
             z = _edna(dok)
-            if z is None:
+            if z is None or _prazna(z):
+                # Празно четене не се записва — иначе в списъка влиза „друга
+                # част“ без съдържание и обърква броя на прочетените. (01.10.2026)
                 prichini.append((chetec.ime, "празен отговор"))
                 continue
             z.update({
@@ -262,6 +264,15 @@ def procheti(chetci, ime, media_type, data_b64, stranici=None):
         except NeMozheSega as e:
             prichini.append((chetec.ime, str(e)[:300]))
     raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])
+
+
+def _prazna(z):
+    """Четене без нищо вътре — нито признак, нито материал, нито дори обект."""
+    if any(z.get(k) for k in ("priznaci", "materiali", "instalacii", "chisla",
+                              "drug_proekt", "normi", "iziskvania", "chelen_list")):
+        return False
+    return not any(str(z.get(k) or "").strip()
+                   for k in ("obekt", "upi", "investitor", "proektant", "opisanie", "chast_ime"))
 
 
 def _edna(dok):
