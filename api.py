@@ -253,6 +253,18 @@ def init_db():
                 CREATE INDEX IF NOT EXISTS idx_login_attempts_email
                 ON login_attempts (email, created_at)
             """)
+            # Общи данни на фирмата, които не са паспорт: консултантите и
+            # историята. Дотук стояха само в браузъра — оттам Edge ≠ Chrome и
+            # нулево резервно копие. Ключът е от DANNI_KLYUCHOVE. (01.10.2026)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS tenant_danni (
+                    tenant_id  TEXT NOT NULL,
+                    klyuch     TEXT NOT NULL,
+                    stoynost   JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ DEFAULT NOW(),
+                    PRIMARY KEY (tenant_id, klyuch)
+                )
+            """)
     conn.close()
     print("PostgreSQL: таблиците са готови")
 
@@ -1783,6 +1795,85 @@ def cloud_load():
         return jsonify(payload)
     except Exception:
         return jsonify({"projects": [], "consultants": [], "history": []}), 200
+
+
+# ── Общи данни на фирмата (консултанти, история) ──────────────────────────────
+# Паспортите отдавна се пазят в базата, но консултантите и историята стояха САМО
+# в браузъра — затова Edge и Chrome показваха различни неща, а единственото
+# копие беше в localStorage (което при пълна квота мълчеше). Dropbox е пътят на
+# /api/cloud/*, но той не е свързан; базата данни работи. (01.10.2026)
+#
+# Нарочно НЕ е свободно килерче: ключът се проверява срещу списък, за да не се
+# превърне в място, където всеки запише каквото му хрумне.
+DANNI_KLYUCHOVE = ("konsultanti", "istoria")
+
+
+def _danni_proverka(klyuch):
+    """Връща (tenant_id, greshka_otgovor). Едното от двете е None."""
+    if klyuch not in DANNI_KLYUCHOVE:
+        return None, (jsonify({"error": f"Непознат ключ „{klyuch}“"}), 400)
+    tenant_id = request.current_user.get("tenant_id")
+    if not tenant_id:
+        return None, (jsonify({"error": "Токенът не съдържа tenant_id"}), 403)
+    return str(tenant_id), None
+
+
+@app.route("/api/danni/<klyuch>", methods=["GET"])
+@require_auth
+def danni_vzemi(klyuch):
+    tenant_id, greshka = _danni_proverka(klyuch)
+    if greshka:
+        return greshka
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е конфигурирана"}), 503
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT stoynost, updated_at FROM tenant_danni "
+                            "WHERE tenant_id = %s AND klyuch = %s", (tenant_id, klyuch))
+                red = cur.fetchone()
+    finally:
+        conn.close()
+    # Няма ред още — това не е грешка, а „този наемател още не е записвал“.
+    if not red:
+        return jsonify({"klyuch": klyuch, "stoynost": None, "updated_at": None})
+    return jsonify({"klyuch": klyuch, "stoynost": red["stoynost"],
+                    "updated_at": red["updated_at"].isoformat() if red["updated_at"] else None})
+
+
+@app.route("/api/danni/<klyuch>", methods=["POST"])
+@require_auth
+def danni_zapishi(klyuch):
+    tenant_id, greshka = _danni_proverka(klyuch)
+    if greshka:
+        return greshka
+    body = request.get_json(silent=True) or {}
+    if "stoynost" not in body:
+        return jsonify({"error": "Липсва поле „stoynost“"}), 400
+    stoynost = body["stoynost"]
+    if not isinstance(stoynost, (list, dict)):
+        return jsonify({"error": "„stoynost“ трябва да е списък или обект"}), 400
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е конфигурирана"}), 503
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO tenant_danni (tenant_id, klyuch, stoynost, updated_at)
+                    VALUES (%s, %s, %s::jsonb, NOW())
+                    ON CONFLICT (tenant_id, klyuch) DO UPDATE
+                        SET stoynost = EXCLUDED.stoynost, updated_at = NOW()
+                    RETURNING updated_at
+                """, (tenant_id, klyuch, json.dumps(stoynost, ensure_ascii=False)))
+                koga = cur.fetchone()["updated_at"]
+    finally:
+        conn.close()
+    log_action("danni_zapishi", user_id=request.current_user["sub"], tenant_id=tenant_id,
+               detail={"klyuch": klyuch, "broy": len(stoynost)})
+    return jsonify({"status": "ok", "klyuch": klyuch, "broy": len(stoynost),
+                    "updated_at": koga.isoformat() if koga else None})
 
 
 # ── AI Протоколи ──────────────────────────────────────────────────────────────
