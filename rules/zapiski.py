@@ -410,6 +410,26 @@ def _ime_na_chast(ime):
     return CHASTI[kod] if kod else (str(ime or "").strip())
 
 
+# Номерът на УПИ е РИМСКО ЧИСЛО. „VHI-503“ не е валидно римско число — а
+# „VIII-503“ е. Това хваща случая, който смесената азбука пропуска: ABBYY е
+# прочел двете „II“ като едно „H“, при това латинско, тоест нищо не се смесва.
+# (01.10.2026 — операторът: „VIII-503 е вярно, VHI е от записка през ABBYY“.)
+_KAM_LATINICA = str.maketrans({"Н": "H", "Х": "X", "С": "C", "І": "I", "М": "M",
+                               "Д": "D", "Л": "L", "В": "B", "І": "I"})
+_RIMSKO = re.compile(r"^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$")
+_SLED_UPI = re.compile(r'УПИ\s+([A-Za-zА-Яа-я]{1,10})')
+
+
+def nevalidno_rimsko(tekst):
+    """Номера след „УПИ“, които не са валидни римски числа. Празно — всичко е наред."""
+    out = []
+    for nomer in _SLED_UPI.findall(str(tekst or "")):
+        lat = nomer.upper().translate(_KAM_LATINICA)
+        if not _RIMSKO.match(lat) or not lat:
+            out.append(nomer)
+    return out
+
+
 def _grupa(zapiski, vzemi, norm=None):
     """Стойност → кои части я твърдят. За хващане на разминавания между частите."""
     norm = norm or _norm_svobodno
@@ -418,6 +438,7 @@ def _grupa(zapiski, vzemi, norm=None):
         st = (vzemi(z) or "").strip()
         if st:
             po.setdefault(norm(st), {"stoynost": st, "smesena": smesena_azbuka(st),
+                                     "nevalidno": nevalidno_rimsko(st),
                                      "chasti": []})["chasti"].append(
                 CHASTI.get(z.get("chast_kod"), z.get("chast_kod")))
     return list(po.values())
