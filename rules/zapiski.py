@@ -348,6 +348,24 @@ def _norm_svobodno(s):
     return re.sub(r"[^0-9a-zа-я]+", "", _norm_tekst(str(s or "").translate(_BLIZNACI)))
 
 
+# Дума, в която има И латиница, И кирилица, почти винаги идва от разчитането на
+# скан, не от проекта. Операторът, 01.10.2026: „УПИ VIII-503 е вярно, а VНI-503
+# е от записка, прочетена с ABBYY от PDF“ — кирилско Н вместо две латински I.
+# Системата не поправя (тя преписва), но казва на какво прилича.
+_LAT = re.compile(r"[A-Za-z]")
+_KIR = re.compile(r"[А-Яа-яЁё]")
+
+
+def smesena_azbuka(tekst):
+    """Думите, в които латиница и кирилица са смесени. Празно — няма такива."""
+    out = []
+    for duma in re.split(r"[\s,;:()\[\]«»„“”\"']+", str(tekst or "")):
+        jadro = duma.strip(".-–—/")
+        if len(jadro) > 1 and _LAT.search(jadro) and _KIR.search(jadro):
+            out.append(jadro)
+    return out
+
+
 # „ТЕХНИЧЕСКИ ПРОЕКТ“ и „ТП“ са едно и също.
 _FAZI = ((("технически", "тп"), "технически проект"),
          (("идеен", "ип"), "идеен проект"),
@@ -399,7 +417,8 @@ def _grupa(zapiski, vzemi, norm=None):
     for z in zapiski:
         st = (vzemi(z) or "").strip()
         if st:
-            po.setdefault(norm(st), {"stoynost": st, "chasti": []})["chasti"].append(
+            po.setdefault(norm(st), {"stoynost": st, "smesena": smesena_azbuka(st),
+                                     "chasti": []})["chasti"].append(
                 CHASTI.get(z.get("chast_kod"), z.get("chast_kod")))
     return list(po.values())
 
