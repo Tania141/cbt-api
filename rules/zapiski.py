@@ -95,8 +95,11 @@ SHEMA = {
         "properties": {
             "chast_kod": _s("коя част на проекта е записката", enum=list(CHASTI)),
             "chast_ime": _s("как е наречена частта в самата записка, дословно"),
-            "obekt":     _s("наименованието на строежа, дословно"),
+            "obekt":     _s("наименованието на САМИЯ строеж, дословно — това, което стои ПРЕДИ „за обект…“"),
+            "zahranvan_obekt": _s("ако строежът е мрежа или присъединяване: КОЙ обект захранва — "
+                                  "частта след „за обект…“, дословно. Иначе празно."),
             "upi":       _s("УПИ / поземлен имот, дословно"),
+            "identifikator": _s("идентификаторът по КККР (напр. 68134.209.689), дословно"),
             "faza":      _s("фаза на проекта — идеен, технически, работен"),
             "investitor": _s("инвеститор, дословно"),
             "vazlozhiteli": {"type": "array", "items": {"type": "string"},
@@ -213,7 +216,23 @@ UKAZANIE = f"""Четеш ОБЯСНИТЕЛНА ЗАПИСКА по една ч
 
 ВАЖНО за „по друг проект“: изрази като „по друг проект“, „по отделен проект“,
 „виж част …“, „от друга разработка“ ги записвай ВИНАГИ. Те сочат съседните
-строежи на площадката и са важни.
+строежи на имота и са важни.
+
+НАЙ-ВАЖНОТО ПРИ МРЕЖИ И ПРИСЪЕДИНЯВАНИЯ (операторът, 01.10.2026):
+Наименование от вида
+    „Външно електрозахранване с нови кабели НН 1kV ЗА ОБЕКТ „Жилищна сграда с
+     офиси и гаражи“, находящ се в УПИ VIII-503 … идентификатор 68134.209.689“
+описва ДВЕ различни неща:
+  · СТРОЕЖЪТ е външното електрозахранване — това е водещото;
+  · „Жилищна сграда с офиси и гаражи“ е само ЗАХРАНВАНИЯТ обект, който казва
+    кой имот се захранва.
+Затова:
+  · в „obekt“ пиши САМО строежа (частта преди „за обект“);
+  · захранвания обект пиши в „zahranvan_obekt“;
+  · УПИ и идентификаторът са на захранвания имот — пиши ги както са.
+И НАЙ-ВАЖНОТО: признаци НЕ се вадят от наименованието на захранвания обект.
+„Жилищна сграда с офиси и гаражи“ НЕ значи, че кабелната линия има гаражи или
+етажи. Признак се записва само ако записката казва нещо за САМИЯ строеж.
 """
 
 
@@ -248,6 +267,8 @@ def procheti(chetci, ime, media_type, data_b64, stranici=None):
                                   n_stranici=MAX_STRANICI if prep.get("n", 0) > MAX_STRANICI else 0,
                                   edin_dokument=True)
             z = _edna(dok)
+            if z is not None:
+                pochisti_ot_zahranvania(z)
             if z is None or _prazna(z):
                 # Празно четене не се записва — иначе в списъка влиза „друга
                 # част“ без съдържание и обърква броя на прочетените. (01.10.2026)
@@ -264,6 +285,42 @@ def procheti(chetci, ime, media_type, data_b64, stranici=None):
         except NeMozheSega as e:
             prichini.append((chetec.ime, str(e)[:300]))
     raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])
+
+
+_ZA_OBEKT = re.compile(r"(?<![А-яA-Za-z])за\s+обект(?![А-яA-Za-z])", re.I)
+
+
+def pochisti_ot_zahranvania(z):
+    """Маха признаци, прочетени от името на ЗАХРАНВАНИЯ обект.
+
+    Операторът, 01.10.2026: при „Външно електрозахранване… за обект «Жилищна
+    сграда с офиси и гаражи»“ водещото е захранването, не сградата. Четецът
+    беше записал „има гаражи“ като признак на кабелната линия. Указанието му го
+    забранява, но указание, което вече веднъж не е спазено, иска и предпазител.
+
+    Връща колко са махнати.
+    """
+    chuzhdo = str(z.get("zahranvan_obekt") or "")
+    if not chuzhdo:
+        ime = str(z.get("obekt") or "")
+        m = _ZA_OBEKT.search(ime)
+        if m:
+            chuzhdo = ime[m.end():]
+    chuzhdo = _norm_tekst(chuzhdo)
+    if len(chuzhdo) < 15:
+        return 0
+    ostavashti, mahnati = [], 0
+    for pr in z.get("priznaci") or []:
+        citat = _norm_tekst((pr or {}).get("citat") or "")
+        # Цитатът е цял вътре в името на чуждия обект → не е за този строеж.
+        if citat and len(citat) >= 8 and citat in chuzhdo:
+            mahnati += 1
+            continue
+        ostavashti.append(pr)
+    z["priznaci"] = ostavashti
+    if mahnati:
+        z["mahnati_chuzhdi"] = mahnati
+    return mahnati
 
 
 def _prazna(z):
@@ -481,7 +538,12 @@ def rezyume(zapiski, vid="sgrada"):
     # 2) Шапката на обекта — тук изплува „УПИ XXXII срещу XXXI“.
     shapka = [r for r in (
         _edno(_grupa(zapiski, lambda z: z.get("obekt")), "Наименование на строежа"),
+        _edno(_grupa(zapiski, lambda z: z.get("zahranvan_obekt")), "Захранван обект (мрежата обслужва)"),
         _edno(_grupa(zapiski, lambda z: z.get("upi")), "УПИ / поземлен имот"),
+        # Идентификаторът е НАЙ-СИГУРНАТА опора: цифрите нямат двойници в
+        # кирилица, затова преживяват разчитането на скан, а римското число —
+        # не („VIII“ стана „VHI“, а 68134.209.689 остана същият). (01.10.2026)
+        _edno(_grupa(zapiski, lambda z: z.get("identifikator")), "Идентификатор по КККР"),
         _edno(_grupa(zapiski, lambda z: z.get("investitor")), "Инвеститор"),
         _edno(_grupa(zapiski, lambda z: z.get("faza"), _faza), "Фаза"),
     ) if r]
@@ -515,6 +577,7 @@ def rezyume(zapiski, vid="sgrada"):
 
     ochakvani = OCHAKVANI.get(vid) or OCHAKVANI["sgrada"]
     return {
+        "mahnati_chuzhdi": sum(int(z.get("mahnati_chuzhdi") or 0) for z in zapiski),
         "chasti_prochetini": [{"kod": k, "ime": CHASTI.get(k, k)} for k in prochetini],
         "chasti_lipsvat": [{"kod": k, "ime": CHASTI[k]} for k in ochakvani if k not in prochetini],
         "shapka": shapka,
