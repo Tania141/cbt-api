@@ -501,11 +501,15 @@ def _grupa(zapiski, vzemi, norm=None):
     return list(po.values())
 
 
-def _edno(grupi, kakvo):
-    """Едно твърдение или разминаване — в еднакъв вид за показване."""
+def _edno(grupi, kakvo, klyuch=""):
+    """Едно твърдение или разминаване — в еднакъв вид за показване.
+
+    `klyuch` е машинното име на полето: PWA го връзва за склада на фактите, без
+    да разчита на българското заглавие. (01.10.2026)
+    """
     if not grupi:
         return None
-    red = {"kakvo": kakvo, "varianti": grupi}
+    red = {"kakvo": kakvo, "klyuch": klyuch, "varianti": grupi}
     red["edinno"] = len(grupi) == 1
     red["stoynost"] = grupi[0]["stoynost"] if red["edinno"] else ""
     return red
@@ -537,15 +541,15 @@ def rezyume(zapiski, vid="sgrada"):
 
     # 2) Шапката на обекта — тук изплува „УПИ XXXII срещу XXXI“.
     shapka = [r for r in (
-        _edno(_grupa(zapiski, lambda z: z.get("obekt")), "Наименование на строежа"),
-        _edno(_grupa(zapiski, lambda z: z.get("zahranvan_obekt")), "Захранван обект (мрежата обслужва)"),
-        _edno(_grupa(zapiski, lambda z: z.get("upi")), "УПИ / поземлен имот"),
+        _edno(_grupa(zapiski, lambda z: z.get("obekt")), "Наименование на строежа", "obekt"),
+        _edno(_grupa(zapiski, lambda z: z.get("zahranvan_obekt")), "Захранван обект (мрежата обслужва)", "zahranvan_obekt"),
+        _edno(_grupa(zapiski, lambda z: z.get("upi")), "УПИ / поземлен имот", "upi"),
         # Идентификаторът е НАЙ-СИГУРНАТА опора: цифрите нямат двойници в
         # кирилица, затова преживяват разчитането на скан, а римското число —
         # не („VIII“ стана „VHI“, а 68134.209.689 остана същият). (01.10.2026)
-        _edno(_grupa(zapiski, lambda z: z.get("identifikator")), "Идентификатор по КККР"),
-        _edno(_grupa(zapiski, lambda z: z.get("investitor")), "Инвеститор"),
-        _edno(_grupa(zapiski, lambda z: z.get("faza"), _faza), "Фаза"),
+        _edno(_grupa(zapiski, lambda z: z.get("identifikator")), "Идентификатор по КККР", "identifikator"),
+        _edno(_grupa(zapiski, lambda z: z.get("investitor")), "Инвеститор (възложител по договор)", "investitor"),
+        _edno(_grupa(zapiski, lambda z: z.get("faza"), _faza), "Фаза на проекта", "faza"),
     ) if r]
 
     # 3) Проектантите: челният лист на която и да е част дава всички.
@@ -583,6 +587,12 @@ def rezyume(zapiski, vid="sgrada"):
         "shapka": shapka,
         "priznaci": sorted(priznaci.values(), key=lambda v: v["priznak"]),
         "proektanti": proektanti,
+        # Възложителите от челния лист → „собственик на земята“ (възложителят по
+        # ЗУТ). Нейното разграничение, 01.10.2026: по ЗУТ възложителят е
+        # собственикът на земята, а по договорите ѝ е друг (инвеститорът).
+        "sobstvenici_ot_zapiski": sorted({
+            str(v).strip() for z in zapiski for v in (z.get("vazlozhiteli") or [])
+            if str(v or "").strip()}),
         "materiali": saberi("materiali"),
         "instalacii": saberi("instalacii"),
         "chisla": saberi("chisla"),
