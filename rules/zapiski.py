@@ -581,18 +581,82 @@ def chuzhdi_zapiski(zapiski):
     return nashi, chuzhdi, False
 
 
+# ── Записка за ДРУГ СТРОЕЖ в същия имот ──────────────────────────────────────
+# Операторът, 02.10.2026: „същото важи и за обекта, ако и да е в същото УПИ. Ако
+# сме му казали канал, а му предлагам архитектура, редно е да ги различава.“
+#
+# В нейния случай в един имот има два строежа: „Уличен канал Ø600-ПП и Ø800-ПП“ и
+# „Две жилищни сгради с надземни и подземни гаражи“. Записка на единия, качена
+# при другия, не е разминаване — просто ѝ е сбъркано мястото.
+#
+# Разпознава се по ЕСТЕСТВОТО на строежа, не по изписването: мрежа срещу сграда.
+# Нарочно груб белег — фин не е възможен и би сгрешил.
+
+_DUMI_MREZHA = ("канал", "водопровод", "кабел", "електрозахранван", "захранван",
+                "трасе", "улич", "пътна", "ктп", "провод", "колектор",
+                "отклонение", "мрежа", "газопровод", "топлопровод", "сервитут",
+                "присъединяван", "външно")
+_DUMI_SGRADA = ("сграда", "жилищн", "офис", "хотел", "детск", "училищ", "болниц",
+                "магазин", "склад", "производствен", "пристройка", "надстройка",
+                "къща", "вила")
+
+
+def vid_na_stroezh(tekst):
+    """„мрежа“ · „сграда“ · „“ (не личи). Мрежата се проверява първа: името на
+    мрежата често съдържа и сградата, която захранва."""
+    t = _norm_tekst(tekst)
+    if not t:
+        return ""
+    if any(d in t for d in _DUMI_MREZHA):
+        return "мрежа"
+    if any(d in t for d in _DUMI_SGRADA):
+        return "сграда"
+    return ""
+
+
+def za_drug_stroezh(zapiski, ime_na_stroezha=""):
+    """Кои записки са за друг строеж в същия имот.
+
+    Мерилото е името, което операторът е дал на строежа; ако го няма — мнозинството.
+    Връща (nashi, drugi).
+    """
+    vidove = [vid_na_stroezh(z.get("obekt")) for z in zapiski]
+    nash = vid_na_stroezh(ime_na_stroezha)
+    if not nash:
+        broi = {}
+        for v in vidove:
+            if v:
+                broi[v] = broi.get(v, 0) + 1
+        if len(broi) < 2:
+            return zapiski, []
+        naredeni = sorted(broi.items(), key=lambda kv: -kv[1])
+        if naredeni[0][1] == naredeni[1][1]:
+            return zapiski, []          # по равно — не гадаем
+        nash = naredeni[0][0]
+    nashi = [z for z, v in zip(zapiski, vidove) if v in (nash, "")]
+    drugi = [z for z, v in zip(zapiski, vidove) if v and v != nash]
+    return nashi, drugi
+
+
 def _opisanie_imot(z):
     return " · ".join(x for x in (str(z.get("upi") or "").strip(),
                                   str(z.get("identifikator") or "").strip(),
                                   str(z.get("investitor") or "").strip()) if x)
 
 
-def rezyume(zapiski, vid="sgrada"):
-    """Прочетените записки → какво знаем за обекта и какво не се връзва."""
+def rezyume(zapiski, vid="sgrada", ime_na_stroezha=""):
+    """Прочетените записки → какво знаем за обекта и какво не се връзва.
+
+    `ime_na_stroezha` е как операторът е нарекъл СТРОЕЖА — по него се познава
+    записка, която е за друг строеж в същия имот.
+    """
     zapiski = [z for z in zapiski if isinstance(z, dict)]
-    # Записка за ДРУГ имот се маха, преди да е влязла във фактите.
+    # Две чистения, преди каквото и да е да влезе във фактите:
+    # 1) записка за ДРУГ ИМОТ — изобщо не е тук;
+    # 2) записка за ДРУГ СТРОЕЖ в същия имот — тук е, но не на този строеж.
     vsichki = zapiski
     zapiski, chuzhdi, neyasno = chuzhdi_zapiski(zapiski)
+    zapiski, drug_stroezh = za_drug_stroezh(zapiski, ime_na_stroezha)
     prochetini = [z.get("chast_kod") for z in zapiski]
 
     # 1) Признаците — отговорите, които няма да питаме оператора.
@@ -661,6 +725,12 @@ def rezyume(zapiski, vid="sgrada"):
         "chuzhdi_zapiski": [{"chast": CHASTI.get(z.get("chast_kod"), z.get("chast_kod")),
                              "fajl": z.get("fajl", ""), "imot": _opisanie_imot(z)} for z in chuzhdi],
         "nash_imot": _opisanie_imot(zapiski[0]) if (chuzhdi and zapiski) else "",
+        # Тук са, но на друг строеж — операторът може да ги премести.
+        "drug_stroezh_zapiski": [{"chast": CHASTI.get(z.get("chast_kod"), z.get("chast_kod")),
+                                  "fajl": z.get("fajl", ""), "obekt": z.get("obekt", ""),
+                                  "vid": vid_na_stroezh(z.get("obekt"))} for z in drug_stroezh],
+        "nash_vid_stroezh": (vid_na_stroezh(ime_na_stroezha)
+                             or (vid_na_stroezh(zapiski[0].get("obekt")) if zapiski else "")),
         # Няма мнозинство (напр. две записки, два имота) — не гадаем кой е нашият.
         "imotat_e_neyasen": neyasno,
         "imoti_v_papkata": (sorted({_opisanie_imot(z) for z in vsichki if _imot_znaci(z)})

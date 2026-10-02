@@ -1409,7 +1409,9 @@ def zapiski_rezyume():
     from rules import zapiski
     body = request.get_json() or {}
     try:
-        return jsonify(zapiski.rezyume(body.get("zapiski") or [], vid=body.get("vid") or "sgrada"))
+        return jsonify(zapiski.rezyume(body.get("zapiski") or [],
+                                       vid=body.get("vid") or "sgrada",
+                                       ime_na_stroezha=body.get("ime_na_stroezha") or ""))
     except Exception as e:
         print(f"zapiski_rezyume: {type(e).__name__}: {e}", flush=True)
         return jsonify({"greshka": f"{type(e).__name__}: {e}"})
