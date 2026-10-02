@@ -403,6 +403,10 @@ def vdigni_pokazateli(z):
         if not st:
             continue
         merna = str(red.get("merna") or "").strip()
+        # „Плътност 2828,4 м²“ е застроена площ, не процент — не го вдигай като
+        # плътност, иначе сравнението гърми. (Операторът, 02.10.2026)
+        if kod in ("plytnost_post", "kint_post") and re.search(r"м\s*2|м²|кв", merna + " " + st, re.I):
+            continue
         z.setdefault("priznaci", []).append({
             "priznak": kod,
             "stoynost": f"{st} {merna}".strip(),
