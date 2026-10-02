@@ -1411,7 +1411,8 @@ def zapiski_rezyume():
     try:
         return jsonify(zapiski.rezyume(body.get("zapiski") or [],
                                        vid=body.get("vid") or "sgrada",
-                                       ime_na_stroezha=body.get("ime_na_stroezha") or ""))
+                                       ime_na_stroezha=body.get("ime_na_stroezha") or "",
+                                       stari_identifikatori=body.get("stari_identifikatori") or []))
     except Exception as e:
         print(f"zapiski_rezyume: {type(e).__name__}: {e}", flush=True)
         return jsonify({"greshka": f"{type(e).__name__}: {e}"})

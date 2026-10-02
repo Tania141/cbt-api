@@ -550,14 +550,32 @@ def _imot_znaci(z):
     return znaci
 
 
-def chuzhdi_zapiski(zapiski):
+def chuzhdi_zapiski(zapiski, nashi_identifikatori=()):
     """Разделя на „за този имот“ и „за друг“. Решава мнозинството.
 
-    Връща (nashi, chuzhdi, neyasno). `neyasno` е True, когато няма мнозинство —
+    `nashi_identifikatori` — всички идентификатори на ТОЗИ имот, включително
+    предишните. Операторът, 02.10.2026: „УПИ III обединява три идентификатора и
+    накрая е получило един 68134.4354.781 — имало е 3 имота, станали са 1 УПИ с
+    1 идентификатор“. Визата носи СТАРИТЕ; без тях излиза като чужд имот.
+    Затова те са ПСЕВДОНИМИ: всеки се заменя с един и същ белег.
+
+    Връща (nashi, chuzhdi, neyasno). `neyasno` е True при липса на мнозинство —
     тогава НИЩО не се изключва и операторът решава.
     """
-    znaci = [_imot_znaci(z) for z in zapiski]
-    # Свързване: записки, които делят поне един белег, са един имот.
+    psevdonimi = {re.sub(r"[^\d.]", "", str(x)).strip(".")
+                  for x in (nashi_identifikatori or []) if str(x).strip()}
+    psevdonimi.discard("")
+
+    def znaci_na(z):
+        zn = set()
+        for vid, st in _imot_znaci(z):
+            if vid == "ид" and st in psevdonimi:
+                zn.add(("ид", "НАШИЯТ"))      # всички наши номера са един белег
+            else:
+                zn.add((vid, st))
+        return zn
+
+    znaci = [znaci_na(z) for z in zapiski]
     grupi = []                                   # [(множество белези, [индекси])]
     for i, zn in enumerate(znaci):
         if not zn:
@@ -571,13 +589,17 @@ def chuzhdi_zapiski(zapiski):
         grupi.append(nova)
     if len(grupi) < 2:
         return zapiski, [], False
-    grupi.sort(key=lambda g: -len(g[1]))
-    if len(grupi[0][1]) == len(grupi[1][1]):
-        return zapiski, [], True
-    nashi_i = set(grupi[0][1])
-    bez_znaci = {i for i, zn in enumerate(znaci) if not zn}
-    nashi = [z for i, z in enumerate(zapiski) if i in nashi_i or i in bez_znaci]
-    chuzhdi = [z for i, z in enumerate(zapiski) if i not in nashi_i and i not in bez_znaci]
+    # Групата с НАШИЯТ идентификатор печели, дори да е по-малка.
+    nasha = next((g for g in grupi if ("ид", "НАШИЯТ") in g[0]), None)
+    if nasha is None:
+        grupi.sort(key=lambda g: -len(g[1]))
+        if len(grupi[0][1]) == len(grupi[1][1]):
+            return zapiski, [], True
+        nasha = grupi[0]
+    nashi_i = set(nasha[1])
+    bez = {i for i, zn in enumerate(znaci) if not zn}
+    nashi = [z for i, z in enumerate(zapiski) if i in nashi_i or i in bez]
+    chuzhdi = [z for i, z in enumerate(zapiski) if i not in nashi_i and i not in bez]
     return nashi, chuzhdi, False
 
 
@@ -644,7 +666,7 @@ def _opisanie_imot(z):
                                   str(z.get("investitor") or "").strip()) if x)
 
 
-def rezyume(zapiski, vid="sgrada", ime_na_stroezha=""):
+def rezyume(zapiski, vid="sgrada", ime_na_stroezha="", stari_identifikatori=()):
     """Прочетените записки → какво знаем за обекта и какво не се връзва.
 
     `ime_na_stroezha` е как операторът е нарекъл СТРОЕЖА — по него се познава
@@ -655,7 +677,7 @@ def rezyume(zapiski, vid="sgrada", ime_na_stroezha=""):
     # 1) записка за ДРУГ ИМОТ — изобщо не е тук;
     # 2) записка за ДРУГ СТРОЕЖ в същия имот — тук е, но не на този строеж.
     vsichki = zapiski
-    zapiski, chuzhdi, neyasno = chuzhdi_zapiski(zapiski)
+    zapiski, chuzhdi, neyasno = chuzhdi_zapiski(zapiski, stari_identifikatori)
     zapiski, drug_stroezh = za_drug_stroezh(zapiski, ime_na_stroezha)
     prochetini = [z.get("chast_kod") for z in zapiski]
 
