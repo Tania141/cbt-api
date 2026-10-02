@@ -247,6 +247,9 @@ UKAZANIE = f"""Четеш ОБЯСНИТЕЛНА ЗАПИСКА по една ч
 Ако имотът попада в НЯКОЛКО устройствени зони, изброй ги всичките в „zona“ и
 запиши показателите на всяка, както са написани — не ги сливай и не избирай.
 
+ЗП, РЗП, площта на имота, озеленяването, котата корниз и височината СА
+ПОКАЗАТЕЛИ — слагай ги в „priznaci“ със съответния код, не само в „chisla“.
+
 ВАЖНО за признаците: „няма“ е отговор САМО когато записката го казва или когато
 от описанието ѝ личи недвусмислено (изброява етажите и сутерен не фигурира).
 Ако частта просто не говори за нещо — ПРОПУСНИ признака. Мълчанието на част ВиК
@@ -307,6 +310,7 @@ def procheti(chetci, ime, media_type, data_b64, stranici=None):
             z = _edna(dok)
             if z is not None:
                 pochisti_ot_zahranvania(z)
+                vdigni_pokazateli(z)
             if z is None or _prazna(z):
                 # Празно четене не се записва — иначе в списъка влиза „друга
                 # част“ без съдържание и обърква броя на прочетените. (01.10.2026)
@@ -359,6 +363,57 @@ def pochisti_ot_zahranvania(z):
     if mahnati:
         z["mahnati_chuzhdi"] = mahnati
     return mahnati
+
+
+# Числата, които ВСЪЩНОСТ са показатели. Операторът, 02.10.2026: „РЗП, ЗП и
+# височина са показатели, и площ на имота, и озеленяване“ — а четецът ги беше
+# оставил в свободния списък „числа за сверяване“, където нямат ✔.
+# Кодът ги вдига: указание, което веднъж не е спазено, иска предпазител.
+_CHISLA_KATO_PRIZNAK = (
+    ("разгъната", "rzp"), ("рзп", "rzp"),
+    ("застроена площ", "zp"), ("зп", "zp"),
+    ("площ на имота", "plosht_upi"), ("площ на упи", "plosht_upi"),
+    ("площ на поземления", "plosht_upi"),
+    ("озелен", "ozelen_post"), ("зелени площи", "ozelen_post"),
+    ("корниз", "korniz_post"),
+    ("височина", "visochina"),
+    ("плътност", "plytnost_post"),
+    ("интензивност", "kint_post"), ("кинт", "kint_post"),
+)
+
+
+def vdigni_pokazateli(z):
+    """Числа с познато име → признаци. Връща колко са вдигнати.
+
+    Числото ОСТАВА и в списъка — там се вижда контекстът; признакът е за ✔.
+    Признак, който вече съществува, не се пипа: той е по-точен.
+    """
+    ima = {p.get("priznak") for p in (z.get("priznaci") or []) if isinstance(p, dict)}
+    vdignati = 0
+    for red in z.get("chisla") or []:
+        if not isinstance(red, dict):
+            continue
+        kakvo = _norm_tekst(red.get("kakvo"))
+        if not kakvo:
+            continue
+        kod = next((k for duma, k in _CHISLA_KATO_PRIZNAK if duma in kakvo), None)
+        if not kod or kod in ima:
+            continue
+        st = str(red.get("stoynost") or "").strip()
+        if not st:
+            continue
+        merna = str(red.get("merna") or "").strip()
+        z.setdefault("priznaci", []).append({
+            "priznak": kod,
+            "stoynost": f"{st} {merna}".strip(),
+            "citat": red.get("citat", ""),
+            "stranica": red.get("stranica"),
+            "sverka": red.get("sverka", ""),
+            "ot_chislo": True,
+        })
+        ima.add(kod)
+        vdignati += 1
+    return vdignati
 
 
 def _prazna(z):
@@ -742,6 +797,10 @@ def rezyume(zapiski, vid="sgrada", ime_na_stroezha="", stari_identifikatori=()):
     записка, която е за друг строеж в същия имот.
     """
     zapiski = [z for z in zapiski if isinstance(z, dict)]
+    # И тук, не само при четенето: вече прочетените записки да получат
+    # показателите си без ново четене (и без да се плаща пак). (02.10.2026)
+    for z in zapiski:
+        vdigni_pokazateli(z)
     # Две чистения, преди каквото и да е да влезе във фактите:
     # 1) записка за ДРУГ ИМОТ — изобщо не е тук;
     # 2) записка за ДРУГ СТРОЕЖ в същия имот — тук е, но не на този строеж.
