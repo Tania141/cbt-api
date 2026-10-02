@@ -515,9 +515,84 @@ def _edno(grupi, kakvo, klyuch=""):
     return red
 
 
+# ── Чужда записка ────────────────────────────────────────────────────────────
+# Операторът, 02.10.2026: „не открива генерална грешка — ако иде реч за друго УПИ
+# или за друг обект в това УПИ, то си чеква какво е прочело, а не въобще става
+# или не става“.
+#
+# Истинският случай: папка с три записки, а тази по пожарна безопасност беше за
+# УПИ XII-60, Овча купел 2, идентификатор 68134.4333.274 и друг инвеститор —
+# докато другите две са за УПИ III-1662…, 68134.4354.781. Системата ги сля и
+# каза „частите не се връзват“, сякаш спорят за една и съща сграда.
+#
+# Чуждата записка НЕ Е разминаване. Тя изобщо не е тук и не бива да влиза във
+# фактите — само да се посочи.
+
+_CIFRI = re.compile(r"\d")
+
+
+def _imot_znaci(z):
+    """Белезите, по които се познава имотът: идентификатор и/или УПИ.
+
+    Две записки са за ЕДИН имот, ако съвпадат по КОЙТО И ДА Е белег — едната
+    може да носи само УПИ, другата и двете. Затова не един ключ, а множество.
+    """
+    znaci = set()
+    ident = re.sub(r"[^\d.]", "", str(z.get("identifikator") or ""))
+    ident = ident.strip(".")
+    if ident.count(".") >= 2:
+        znaci.add(("ид", ident))
+    # „УПИ III-1662, 1725, 2329“ и „III-1662,1725,2329“ са едно и също.
+    upi = re.sub(r"^\s*упи\s*", "", str(z.get("upi") or ""), flags=re.I)
+    upi = _norm_svobodno(upi)
+    if len(upi) >= 4:
+        znaci.add(("упи", upi))
+    return znaci
+
+
+def chuzhdi_zapiski(zapiski):
+    """Разделя на „за този имот“ и „за друг“. Решава мнозинството.
+
+    Връща (nashi, chuzhdi, neyasno). `neyasno` е True, когато няма мнозинство —
+    тогава НИЩО не се изключва и операторът решава.
+    """
+    znaci = [_imot_znaci(z) for z in zapiski]
+    # Свързване: записки, които делят поне един белег, са един имот.
+    grupi = []                                   # [(множество белези, [индекси])]
+    for i, zn in enumerate(znaci):
+        if not zn:
+            continue
+        sleti = [g for g in grupi if g[0] & zn]
+        nova = (set(zn), [i])
+        for g in sleti:
+            nova[0].update(g[0])
+            nova[1].extend(g[1])
+            grupi.remove(g)
+        grupi.append(nova)
+    if len(grupi) < 2:
+        return zapiski, [], False
+    grupi.sort(key=lambda g: -len(g[1]))
+    if len(grupi[0][1]) == len(grupi[1][1]):
+        return zapiski, [], True
+    nashi_i = set(grupi[0][1])
+    bez_znaci = {i for i, zn in enumerate(znaci) if not zn}
+    nashi = [z for i, z in enumerate(zapiski) if i in nashi_i or i in bez_znaci]
+    chuzhdi = [z for i, z in enumerate(zapiski) if i not in nashi_i and i not in bez_znaci]
+    return nashi, chuzhdi, False
+
+
+def _opisanie_imot(z):
+    return " · ".join(x for x in (str(z.get("upi") or "").strip(),
+                                  str(z.get("identifikator") or "").strip(),
+                                  str(z.get("investitor") or "").strip()) if x)
+
+
 def rezyume(zapiski, vid="sgrada"):
     """Прочетените записки → какво знаем за обекта и какво не се връзва."""
     zapiski = [z for z in zapiski if isinstance(z, dict)]
+    # Записка за ДРУГ имот се маха, преди да е влязла във фактите.
+    vsichki = zapiski
+    zapiski, chuzhdi, neyasno = chuzhdi_zapiski(zapiski)
     prochetini = [z.get("chast_kod") for z in zapiski]
 
     # 1) Признаците — отговорите, които няма да питаме оператора.
@@ -581,6 +656,15 @@ def rezyume(zapiski, vid="sgrada"):
 
     ochakvani = OCHAKVANI.get(vid) or OCHAKVANI["sgrada"]
     return {
+        # Записки, които изобщо не са за този имот — посочват се отделно и НЕ
+        # участват в нищо по-долу. (02.10.2026)
+        "chuzhdi_zapiski": [{"chast": CHASTI.get(z.get("chast_kod"), z.get("chast_kod")),
+                             "fajl": z.get("fajl", ""), "imot": _opisanie_imot(z)} for z in chuzhdi],
+        "nash_imot": _opisanie_imot(zapiski[0]) if (chuzhdi and zapiski) else "",
+        # Няма мнозинство (напр. две записки, два имота) — не гадаем кой е нашият.
+        "imotat_e_neyasen": neyasno,
+        "imoti_v_papkata": (sorted({_opisanie_imot(z) for z in vsichki if _imot_znaci(z)})
+                            if neyasno else []),
         "mahnati_chuzhdi": sum(int(z.get("mahnati_chuzhdi") or 0) for z in zapiski),
         "chasti_prochetini": [{"kod": k, "ime": CHASTI.get(k, k)} for k in prochetini],
         "chasti_lipsvat": [{"kod": k, "ime": CHASTI[k]} for k in ochakvani if k not in prochetini],
