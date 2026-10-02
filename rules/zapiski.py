@@ -40,6 +40,8 @@ CHASTI = {
     "OZELEN":   "Озеленяване / паркоустройство",
     "PBZ":      "ПБЗ (план за безопасност и здраве)",
     "TRANSP":   "Транспортен достъп / пътна",
+    "VIZA":     "Виза за проектиране",
+    "SITUACIA": "Ситуация / вертикална планировка",
     "DRUGA":    "друга част",
 }
 
@@ -232,6 +234,10 @@ UKAZANIE = f"""Четеш ОБЯСНИТЕЛНА ЗАПИСКА по една ч
 
 ПРИЗНАЦИ — отговаряй само на тези, за които записката наистина казва нещо:
 {_spisak(PRIZNACI)}
+
+ВИЗАТА ЗА ПРОЕКТИРАНЕ не е част на проекта, а документ на главния архитект —
+„chast_kod“ е VIZA. Тя е ИЗВОРЪТ на допустимите показатели. Ситуацията (таблицата
+с показателите) е SITUACIA.
 
 ГРАДОУСТРОЙСТВЕНИТЕ ПОКАЗАТЕЛИ идват от две места и НЕ се смесват:
   · ДОПУСТИМИТЕ (plytnost_dop, kint_dop, ozelen_dop, korniz_dop, zona, pup,
@@ -563,6 +569,23 @@ def _edno(grupi, kakvo, klyuch=""):
 _CIFRI = re.compile(r"\d")
 
 
+# Само ЯДРОТО на УПИ-то: римското число и номерата на имотите. Кварталът и
+# местността отпадат — „УПИ III-1662,1725,2329“ и „УПИ III-1662, 1725, 2329,
+# кв. 21, м. «Люлин — разширение запад»“ са един и същ имот. (02.10.2026)
+_UPI_YADRO = re.compile(r"(?:упи\s*)?([IVXLCMivxlcm]+)\s*[-–—]\s*([\d\s,\.]+)", re.I)
+
+
+def _upi_yadro(tekst):
+    m = _UPI_YADRO.search(str(tekst or ""))
+    if not m:
+        return ""
+    rimsko = m.group(1).upper()
+    nomera = re.sub(r"[^\d,]", "", m.group(2)).strip(",")
+    # Спира на „кв“ / „м“ — те идват след номерата.
+    nomera = ",".join(sorted(x for x in nomera.split(",") if x))
+    return f"{rimsko}-{nomera}" if nomera else ""
+
+
 def _imot_znaci(z):
     """Белезите, по които се познава имотът: идентификатор и/или УПИ.
 
@@ -570,14 +593,11 @@ def _imot_znaci(z):
     може да носи само УПИ, другата и двете. Затова не един ключ, а множество.
     """
     znaci = set()
-    ident = re.sub(r"[^\d.]", "", str(z.get("identifikator") or ""))
-    ident = ident.strip(".")
-    if ident.count(".") >= 2:
-        znaci.add(("ид", ident))
-    # „УПИ III-1662, 1725, 2329“ и „III-1662,1725,2329“ са едно и също.
-    upi = re.sub(r"^\s*упи\s*", "", str(z.get("upi") or ""), flags=re.I)
-    upi = _norm_svobodno(upi)
-    if len(upi) >= 4:
+    # Визата на обединен имот носи НЯКОЛКО номера — всичките са негови белези.
+    for x in identifikatori_v(z):
+        znaci.add(("ид", x))
+    upi = _upi_yadro(z.get("upi"))
+    if upi:
         znaci.add(("упи", upi))
     return znaci
 
@@ -692,6 +712,23 @@ def za_drug_stroezh(zapiski, ime_na_stroezha=""):
     return nashi, drugi
 
 
+_IDENT = re.compile(r'(?<!\d)\d{5}\.\d+\.\d+(?!\d)')
+
+
+def identifikatori_v(z):
+    """Всички идентификатори по КККР, които се срещат в записката."""
+    kade = [z.get("identifikator"), z.get("upi"), z.get("obekt"), z.get("zahranvan_obekt")]
+    for p in z.get("priznaci") or []:
+        if isinstance(p, dict):
+            kade += [p.get("stoynost"), p.get("citat")]
+    namereni = []
+    for t in kade:
+        for x in _IDENT.findall(str(t or "")):
+            if x not in namereni:
+                namereni.append(x)
+    return namereni
+
+
 def _opisanie_imot(z):
     return " · ".join(x for x in (str(z.get("upi") or "").strip(),
                                   str(z.get("identifikator") or "").strip(),
@@ -777,7 +814,10 @@ def rezyume(zapiski, vid="sgrada", ime_na_stroezha="", stari_identifikatori=()):
         # Записки, които изобщо не са за този имот — посочват се отделно и НЕ
         # участват в нищо по-долу. (02.10.2026)
         "chuzhdi_zapiski": [{"chast": CHASTI.get(z.get("chast_kod"), z.get("chast_kod")),
-                             "fajl": z.get("fajl", ""), "imot": _opisanie_imot(z)} for z in chuzhdi],
+                             "fajl": z.get("fajl", ""), "imot": _opisanie_imot(z),
+                             # Визата на обединен имот носи ВСИЧКИТЕ стари номера —
+                             # операторът ги приема наведнъж. (02.10.2026)
+                             "identifikatori": identifikatori_v(z)} for z in chuzhdi],
         "nash_imot": _opisanie_imot(zapiski[0]) if (chuzhdi and zapiski) else "",
         # Тук са, но на друг строеж — операторът може да ги премести.
         "drug_stroezh_zapiski": [{"chast": CHASTI.get(z.get("chast_kod"), z.get("chast_kod")),
