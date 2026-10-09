@@ -1365,6 +1365,39 @@ def cheklist_dokumenti():
     return jsonify({**rezultat, "priznaci": priznaci})
 
 
+# ── Надзорът: протоколите по ред, всеки със своя чеклист ─────────────────────
+# Чеклистът спира да е списък от 86 реда и става ИЗГЛЕД: всеки протокол показва
+# само своето парче. Виж `rules/momenti.py` за това откъде идва подредбата.
+
+@app.route("/api/nadzor", methods=["POST"])
+@require_auth
+def nadzor():
+    from rules import momenti
+    body = request.get_json() or {}
+    try:
+        grupi = momenti.po_momenti(
+            sastavyani=body.get("sastavyani") or [],
+            prilozhimi=body.get("prilozhimi"),
+        )
+    except momenti.NyamaIztochnik as e:
+        return jsonify({"greshka": str(e)}), 200
+    except Exception as e:
+        print(f"nadzor: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"greshka": f"{type(e).__name__}: {e}"}), 200
+
+    nalichni = set(body.get("nalichni") or [])
+    tekusht = body.get("tekusht") or ""
+    mesto = momenti.MYASTO.get(tekusht, len(momenti.RED)) if tekusht else len(momenti.RED)
+    for g in grupi:
+        g["minal"] = momenti.MYASTO.get(g["moment"], 0) <= mesto
+        for d in g["dokumenti"]:
+            d["sastoyanie"] = ("налично" if d["dokument"] in nalichni
+                               else "очаква се" if g["minal"] else "не му е времето")
+        g["lipsvat"] = sum(1 for d in g["dokumenti"] if d["sastoyanie"] == "очаква се")
+        g["gotovi"] = sum(1 for d in g["dokumenti"] if d["sastoyanie"] == "налично")
+    return jsonify({"red": momenti.RED, "po_izbor": sorted(momenti.PO_IZBOR), "grupi": grupi})
+
+
 # ── Записките по частите на проекта ──────────────────────────────────────────
 # Операторът, 01.10.2026: „вместо ние да измисляме топлата вода, най-добре е
 # системата да прочете проекта и да предложи каквото има за предлагане“.
