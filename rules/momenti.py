@@ -51,6 +51,13 @@ RED = ["ОСИП", "РС", "Протокол 1", "Протокол 2", "Запо
        "Протокол 17", "Акт 16", "ОД", "Технически паспорт"]
 MYASTO = {m: i for i, m in enumerate(RED)}
 
+# Фазите. РС е превключвателят — операторът, 02.10.2026: „то всъщност разделя
+# обекта за ОСИП и за СМР“. Затова ОСИП не се показва в надзора и обратно.
+FAZI = {
+    "osip":   ["ОСИП"],
+    "nadzor": [m for m in RED if m != "ОСИП"],
+}
+
 # Моменти, които не винаги се съставят. Празен списък значи „винаги“.
 # Акт 5 и 6 са за 1–3 категория; Акт 16 — само при назначена ДПК; Протокол 17 —
 # по поискване. Правило 3 ги прескача, като не се съставят.
@@ -115,7 +122,7 @@ def sledvashtiyat(moment, sastavyani):
     return moment
 
 
-def po_momenti(sastavyani=None, prilozhimi=None):
+def po_momenti(sastavyani=None, prilozhimi=None, faza="nadzor"):
     """Документите, подредени по момент.
 
     `sastavyani` — моментите, които наистина се съставят за този строеж
@@ -130,11 +137,13 @@ def po_momenti(sastavyani=None, prilozhimi=None):
             continue
         m = sledvashtiyat(r["moment"], sast)
         grupi.setdefault(m, []).append({**r, "iskan_na": m})
+    vidimi = FAZI.get(faza) or RED
     # Моментите по избор се показват ВИНАГИ, дори празни: иначе изключеният
     # Протокол 1 изчезва от екрана и операторът няма как да го върне.
     for m in PO_IZBOR:
-        grupi.setdefault(m, [])
-    return [{"moment": m, "dokumenti": grupi[m]} for m in RED if m in grupi]
+        if m in vidimi:
+            grupi.setdefault(m, [])
+    return [{"moment": m, "dokumenti": grupi[m]} for m in vidimi if m in grupi]
 
 
 def sastoyanie(dokument_imena, nalichni, tekusht=None):

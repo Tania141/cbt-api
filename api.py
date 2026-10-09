@@ -1378,6 +1378,7 @@ def nadzor():
         grupi = momenti.po_momenti(
             sastavyani=body.get("sastavyani") or [],
             prilozhimi=body.get("prilozhimi"),
+            faza=body.get("faza") or "nadzor",
         )
     except momenti.NyamaIztochnik as e:
         return jsonify({"greshka": str(e)}), 200
