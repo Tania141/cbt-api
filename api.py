@@ -460,6 +460,10 @@ def generate_from_template(template_name, replacements):
         raise FileNotFoundError(f"Шаблонът '{template_name}' липсва локално → {path}")
     doc = Document(path)
     fill_template(doc, replacements)
+    # Всеки документ е работно копие до подписа — липсващото се вижда жълто.
+    # (Операторът, 09.10.2026)
+    from cbt_docx import marker_lipsvashto
+    marker_lipsvashto(doc)
     buf = io.BytesIO(); doc.save(buf); return buf.getvalue()
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
@@ -1247,6 +1251,11 @@ def generate_od_ai():
         tehn = doklad_sloy2.vmukni_tehnichesko(doc, str(body.get("tehnichesko") or ""))
         if not tehn:
             rez["prichini"].append("Раздел Б: няма записано техническо описание на строежа — остава заместителят.")
+        from cbt_docx import marker_lipsvashto as _marker
+        marker = _marker(doc)
+        if marker:
+            rez["prichini"].insert(0, f"{marker} места в доклада са празни и са МАРКИРАНИ ЖЪЛТО — "
+                                      "те се попълват, преди да се разпечата и подпише.")
         buf = io.BytesIO(); doc.save(buf); buf.seek(0)
     except FileNotFoundError as e:
         return jsonify({"error": str(e)}), 404

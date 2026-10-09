@@ -803,6 +803,47 @@ def _fill_textboxes(part_element, doc, replacements):
             replace_in_runs(Paragraph(p_el, doc), replacements)
 
 
+# Липсващото се маркира ЖЪЛТО в самия документ. Операторът, 09.10.2026: „така
+# или иначе всеки документ си е работно копие до разпечатването и подписването
+# му. Най-добре е липсващото да е маркирано — жълто или [___], за да се вижда,
+# и списък КАКВО ЛИПСВА.“
+#
+# Маркират се само познатите белези за празно: редицата точки (`_PRAZNO`) и
+# „[___]“, с които шаблоните оставят непопълненото. Подписът се слага на хартия
+# — дотогава жълтото е помощ, не дефект.
+_BELEZI_PRAZNO = ("[___]", "_PRAZNO_TOCHKI_")
+
+
+def _marker_prazno(para):
+    """Жълто върху всеки откъс, който е празно място. Връща колко са."""
+    from docx.enum.text import WD_COLOR_INDEX
+    n = 0
+    for run in para.runs:
+        t = run.text or ""
+        if not t.strip():
+            continue
+        if "[___]" in t or ("." * 20) in t:
+            try:
+                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                n += 1
+            except Exception:
+                pass
+    return n
+
+
+def marker_lipsvashto(doc):
+    """Маркира липсващото в целия документ. Връща броя маркирани откъси."""
+    n = 0
+    for para in doc.paragraphs:
+        n += _marker_prazno(para)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    n += _marker_prazno(para)
+    return n
+
+
 def fill_template(doc, replacements):
     paras = list(doc.paragraphs)
     for para in paras:
