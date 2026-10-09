@@ -1379,6 +1379,8 @@ def nadzor():
             sastavyani=body.get("sastavyani") or [],
             prilozhimi=body.get("prilozhimi"),
             faza=body.get("faza") or "nadzor",
+            priznaci=body.get("priznaci") or {},
+            izklyucheni=body.get("izklyucheni") or [],
         )
     except momenti.NyamaIztochnik as e:
         return jsonify({"greshka": str(e)}), 200
@@ -1396,7 +1398,13 @@ def nadzor():
                                else "очаква се" if g["minal"] else "не му е времето")
         g["lipsvat"] = sum(1 for d in g["dokumenti"] if d["sastoyanie"] == "очаква се")
         g["gotovi"] = sum(1 for d in g["dokumenti"] if d["sastoyanie"] == "налично")
-    return jsonify({"red": momenti.RED, "po_izbor": sorted(momenti.PO_IZBOR), "grupi": grupi})
+    # Какво е решила системата сама — PWA го показва като отметка, не го пита.
+    po_podr = momenti.po_podrazbirane(body.get("priznaci") or {})
+    for g in grupi:
+        g["po_podrazbirane"] = po_podr.get(g["moment"])
+        g["se_sastavya"] = g["moment"] not in (body.get("izklyucheni") or [])
+    return jsonify({"red": momenti.RED, "po_izbor": sorted(momenti.PO_IZBOR),
+                    "po_podrazbirane": po_podr, "grupi": grupi})
 
 
 # ── Записките по частите на проекта ──────────────────────────────────────────

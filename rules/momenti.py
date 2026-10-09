@@ -122,14 +122,65 @@ def sledvashtiyat(moment, sastavyani):
     return moment
 
 
-def po_momenti(sastavyani=None, prilozhimi=None, faza="nadzor"):
+# Кой момент съответства на кой ред в `required.py` — оттам идва отговорът
+# „съставя се ли за ТОЗИ строеж“. Операторът, 09.10.2026: „представях си, че
+# всичко това е по подразбиране… сега операторът тича по екрана“. Права е:
+# системата знае категорията и признаците, няма защо да пита.
+_MOMENT_KAM_NABOR = {
+    "Протокол 1": "protokol1", "Протокол 2": "protokol2",
+    "Заповедна книга": "zk_zaverka", "Констативен акт обр. 3": "obrazec3",
+    "Акт 5": "akt5", "Акт 6": "akt6", "Акт 7": "akt7", "Акт 8": "akt8",
+    "Акт 9": "akt9", "Акт 12": "akt12", "Акт 14": "akt14", "Акт 15": "akt15",
+    "Протокол 17": "protokol17", "Акт 16": "akt16", "ОД": "doklad", "ОСИП": "osip",
+}
+
+
+def po_podrazbirane(priznaci=None):
+    """Кои моменти се съставят за този строеж — по категория и признаци.
+
+    `priznaci`: kategoria (1–5), imaMashini, metalnaKonstrukcia, dpk, po_poiskvane.
+    Връща {момент: True/False}. Непознатите моменти (РС, Акт 10/11/13, ТП) не
+    се решават тук — те са по събитие или не са акт по Наредба № 3.
+    """
+    from . import required as rq
+    pr = priznaci or {}
+    try:
+        kat = int(str(pr.get("kategoria") or "0").strip()[:1])
+    except (ValueError, TypeError):
+        kat = 0
+    uslovie_vyarno = {
+        "montazh": bool(pr.get("metalnaKonstrukcia")) or bool(pr.get("imaMashini")),
+        "mashini": bool(pr.get("imaMashini")),
+        "dpk": bool(pr.get("dpk")),
+        "po_poiskvane": bool(pr.get("po_poiskvane")),
+    }
+    po_kod = {k: (kat_set, usl) for k, _ime, kat_set, usl in rq.NABOR}
+    out = {}
+    for moment, kod in _MOMENT_KAM_NABOR.items():
+        if kod not in po_kod:
+            continue
+        kat_set, usl = po_kod[kod]
+        if kat and kat not in kat_set:
+            out[moment] = False
+        elif usl:
+            out[moment] = uslovie_vyarno.get(usl, False)
+        else:
+            out[moment] = True
+    return out
+
+
+def po_momenti(sastavyani=None, prilozhimi=None, faza="nadzor", priznaci=None,
+               izklyucheni=None):
     """Документите, подредени по момент.
 
-    `sastavyani` — моментите, които наистина се съставят за този строеж
-    (празно = само задължителните). `prilozhimi` — имената на документите,
-    които се изискват за него; празно = всички.
+    Кои моменти се съставят се РЕШАВА по признаците (`po_podrazbirane`);
+    `izklyucheni` е ръчното изключение на оператора, `sastavyani` — ръчното
+    включване. Така той не цъка по екрана, а само поправя.
     """
-    sast = set(sastavyani or ())
+    po_podr = po_podrazbirane(priznaci) if priznaci else {}
+    sast = {m for m in RED
+            if m in (sastavyani or ())
+            or (po_podr.get(m, True) and m not in (izklyucheni or ()))}
     izbor = set(prilozhimi) if prilozhimi is not None else None
     grupi = {}
     for r in redove():
