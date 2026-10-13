@@ -1517,6 +1517,46 @@ def sloy2_chete():
     return jsonify({"dokumenti": dokumenti, "dokument": dok})
 
 
+@app.route("/api/sobstvenost/chete", methods=["POST"])
+@require_auth
+def sobstvenost_chete():
+    """Документ за собственост → прехвърляния за регистъра.
+
+    Отделен от /api/sloy2/chete, защото търси друго: не „какъв документ е
+    това“, а КОЙ НА КОГО КАКЪВ ДЯЛ прехвърля. (13.10.2026)
+    """
+    from rules import sobstvenost, chetci
+    nalichni = chetci.nalichni()
+    if not nalichni:
+        return jsonify({"error": "Няма настроен четец"}), 503
+    body = request.get_json() or {}
+    f = body.get("fajl") or {}
+    izbor = (body.get("chetec") or "auto").lower()
+    if izbor != "auto":
+        nalichni = [c for c in nalichni if c.kod == izbor]
+        if not nalichni:
+            return jsonify({"greshka": f"четецът „{izbor}“ не е настроен на сървъра"})
+    try:
+        dok, info = sobstvenost.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
+                                         f.get("data", ""), stranici=body.get("stranici"))
+    except sobstvenost.NeSeChete as e:
+        return jsonify({"greshka": str(e)})
+    except sobstvenost.NikoyNeMozhe as e:
+        print(f"sobstvenost_chete: никой четец не може за {f.get('ime')}: {e}", flush=True)
+        return jsonify({"error": f"Нито един четец не може да чете сега — {e}"}), 502
+    except Exception as e:
+        print(f"sobstvenost_chete: {type(e).__name__} за {f.get('ime')}: {e}", flush=True)
+        return jsonify({"greshka": f"{type(e).__name__}: {e}"})
+    log_action("sobstvenost_chete", user_id=request.current_user.get("sub"),
+               tenant_id=request.current_user.get("tenant_id"),
+               model=info.get("model"), tokens_in=info.get("tokens_in"),
+               tokens_out=info.get("tokens_out"),
+               detail={"pi": body.get("pi"), "fajl": f.get("ime"),
+                       "chetec": info.get("chetec"),
+                       "prehvarliania": len(dok.get("prehvarliania") or [])})
+    return jsonify({"dokument": dok})
+
+
 @app.route("/api/sloy2/razdeli", methods=["POST"])
 @require_auth
 def sloy2_razdeli():
