@@ -45,10 +45,14 @@ UKAZANIE = """Прочети този документ за собственос
 4. При удостоверение за наследници: прехвърлянето е от наследодателя към всеки
    наследник. Ако документът не казва дяловете, остави dyal празно — ще ги
    реши операторът.
-5. В obekti слагай само обектите, за които документът ПРЕХВЪРЛЯ нещо.
+5. ПО ЕДИН РЕД НА ЧОВЕК. Ако трима придобиват заедно, напиши три реда — за
+   всеки неговия дял. Не слагай няколко имена в едно поле „ot“ или „na“.
+   Ако документът не казва дяловете поотделно, раздели цялото поравно и
+   отбележи това в „citat“.
+6. В obekti слагай само обектите, за които документът ПРЕХВЪРЛЯ нещо.
    Актът често изброява чужди обекти, за да ги изключи от сделката („с
    изключение на гаражни клетки №…“) — тези не ги пиши.
-6. Ако нещо не пише в документа — остави го празно. Не предполагай.
+7. Ако нещо не пише в документа — остави го празно. Не предполагай.
 """
 
 
@@ -130,6 +134,21 @@ def _dyal(txt):
     return None
 
 
+_RAZDELITELI = re.compile(r"\s*(?:,|;| и )\s*")
+
+
+def imena(v):
+    u"""„Иван Петров, Мария Петрова“ → двете имена.
+
+    Четецът понякога слага няколко лица в едно поле, макар указанието да иска
+    по един ред на човек. Това не е повод за тревога — разделя се тук.
+    """
+    t = (v or "").strip()
+    if not t:
+        return []
+    return [x.strip() for x in _RAZDELITELI.split(t) if len(x.strip()) > 2]
+
+
 def belezhki(dok):
     """Какво в прочетеното не връзва. Списък от изречения за оператора."""
     out = []
@@ -142,25 +161,38 @@ def belezhki(dok):
             out.append(f"Дялът „{p['dyal']}“ не се чете — пиши дроб (1/2) или процент (8,38 %).")
         if p.get("vid") == "наследяване" and not p.get("ot"):
             out.append("Наследяване без наследодател.")
-    imena = {(l.get("ime") or "").strip() for l in dok.get("lica") or []}
+    vsichki = set()
+    for l in dok.get("lica") or []:
+        vsichki.update(imena(l.get("ime")))
     for p in dok.get("prehvarliania") or []:
         for kak in ("ot", "na"):
-            ime = (p.get(kak) or "").strip()
-            if ime and ime not in imena:
-                out.append(f"„{ime}“ участва в прехвърляне, но го няма сред лицата.")
+            for ime in imena(p.get(kak)):
+                if ime not in vsichki:
+                    out.append(f"„{ime}“ участва в прехвърляне, но го няма сред лицата.")
     if not dok.get("nomer"):
         out.append("Номерът на акта не е прочетен — вписва се на ръка.")
-    sbor = {}
+    # Сметката е НЕТНА: един акт често описва верига — първо придобиване,
+    # после продажба на същото. Събрани, двете правят 200 % и вдигат фалшива
+    # тревога. (ЖИТЕН, 14.10.2026)
+    salda = {}
     for p in dok.get("prehvarliania") or []:
         f = _dyal(p.get("dyal") or "")
         if f is None:
             continue
         k = (p.get("obekt") or "").strip()
-        sbor[k] = sbor.get(k, Fraction(0)) + f
-    for obekt, f in sbor.items():
+        poluchateli = imena(p.get("na")) or [""]
+        dava = imena(p.get("ot"))
+        salda.setdefault(k, {})
+        for n in poluchateli:
+            salda[k][n] = salda[k].get(n, Fraction(0)) + f / len(poluchateli)
+        for n in dava:
+            salda[k][n] = salda[k].get(n, Fraction(0)) - f / len(dava)
+    for obekt, lica in salda.items():
+        drazhat = sum(v for v in lica.values() if v > 0)
         # Процентите в актовете са закръглени: 2,169 % x 46 не прави точно 100 %.
-        if f > Fraction(1001, 1000):
-            out.append(f"За „{obekt}“ прехвърленото прави {float(f) * 100:.2f} % — повече от цялото.")
+        if drazhat > Fraction(1001, 1000):
+            out.append(f"За „{obekt}“ след всички прехвърляния се държат "
+                       f"{float(drazhat) * 100:.2f} % — повече от цялото.")
     return sorted(set(out))
 
 
