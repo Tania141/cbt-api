@@ -54,7 +54,10 @@ UKAZANIE = """Прочети този документ за собственос
 6. В obekti слагай само обектите, за които документът ПРЕХВЪРЛЯ нещо.
    Актът често изброява чужди обекти, за да ги изключи от сделката („с
    изключение на гаражни клетки №…“) — тези не ги пиши.
-7. Ако нещо не пише в документа — остави го празно. Не предполагай.
+7. НЕ ИЗВЛИЧАЙ ЕГН. Нотариалните актове са пълни с ЕГН-та — пропускай ги.
+   В „egn_eik“ слагай само ЕИК на фирма. Лицето се разпознава по трите имена
+   и по самия акт, а не по ЕГН.
+8. Ако нещо не пише в документа — остави го празно. Не предполагай.
 """
 
 
@@ -81,7 +84,11 @@ SHEMA = {
             "items": {"type": "object", "properties": {
                 "ime": _s("пълното име или наименование на фирмата, дословно"),
                 "vid": _s("физическо или юридическо", enum=["физическо", "юридическо"]),
-                "egn_eik": _s("ЕГН или ЕИК, ако е посочен"),
+                # ЕГН НЕ се извлича. Операторът, 15.10.2026: „личните данни не
+                # трябва да се вписват“. ЕИК на фирма е публичен и остава —
+                # той разпознава юридическото лице.
+                "egn_eik": _s("ЕИК или БУЛСТАТ на ЮРИДИЧЕСКО лице. "
+                              "За физическо лице остави празно — ЕГН НЕ се попълва."),
                 "pochinal": _s("дата на смъртта, ако документът я сочи (наследство)"),
             }},
         },
@@ -151,6 +158,38 @@ def imena(v):
     return [x.strip() for x in _RAZDELITELI.split(t) if len(x.strip()) > 2]
 
 
+_EGN_TEGLA = (2, 4, 8, 5, 10, 9, 7, 3, 6)
+
+
+def e_egn(v):
+    u"""Истинска проверка, не „десет цифри“: телефонът също е десет цифри.
+
+    Месецът е +20 за родените преди 1900 г. и +40 за родените след 1999 г.
+    """
+    t = re.sub(r"[\s-]", "", str(v or ""))
+    if not re.fullmatch(r"\d{10}", t):
+        return False
+    mesec = int(t[2:4])
+    if mesec > 40:
+        mesec -= 40
+    elif mesec > 20:
+        mesec -= 20
+    if not 1 <= mesec <= 12 or not 1 <= int(t[4:6]) <= 31:
+        return False
+    sbor = sum(int(c) * w for c, w in zip(t[:9], _EGN_TEGLA))
+    return (sbor % 11) % 10 == int(t[9])
+
+
+def pochisti_egn(dok):
+    u"""Маха ЕГН-тата, които четецът все пак е върнал. Връща колко са."""
+    n = 0
+    for l in dok.get("lica") or []:
+        if e_egn(l.get("egn_eik")):
+            l["egn_eik"] = ""
+            n += 1
+    return n
+
+
 def belezhki(dok):
     """Какво в прочетеното не връзва. Списък от изречения за оператора."""
     out = []
@@ -212,9 +251,11 @@ def procheti(chetci, ime, media_type, data_b64, stranici=None):
             if not d or not (d.get("prehvarliania") or d.get("obekti")):
                 prichini.append((chetec.ime, "празен отговор"))
                 continue
+            mahnati = pochisti_egn(d)
             d.update({
                 "fajl": ime, "chetec": chetec.ime, "model": i.get("model"),
                 "sken": prep.get("sken", False),
+                "egn_mahnati": mahnati,
                 "belezhki": belezhki(d),
                 "zashto_rezerven": "; ".join(f"{k}: {v}" for k, v in prichini),
             })
