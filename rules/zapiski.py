@@ -189,6 +189,29 @@ SHEMA = {
                     "stranica": {"type": "integer"},
                 }},
             },
+            # Самият описателен текст. Той влиза в ОСИП и, превърнат в сегашно
+            # време, в Акт 15, окончателния доклад, Акт 16 и техническия
+            # паспорт. Дотук се преписваше на ръка между четирите документа.
+            "opisanie_blokove": {
+                "type": "array",
+                "description": "Описателните раздели на записката, ДОСЛОВНО. Това е текстът, "
+                               "който влиза в комплексния доклад. Включвай разделите, които "
+                               "ОПИСВАТ строежа и решенията: ситуационно решение, обемно-"
+                               "пространствено решение, разпределение, конструктивно решение, "
+                               "водопровод, канализация, електрозахранване, отопление, "
+                               "вентилация, енергийна ефективност, геоложки условия и подобни. "
+                               "НЕ включвай: съдържание, челен лист, списъци с чертежи, "
+                               "количествени сметки, таблици с формули и изчисления, "
+                               "нормативни списъци без собствен текст.",
+                "items": {"type": "object", "properties": {
+                    "podzaglavie": _s("заглавието на раздела, както е в записката "
+                                      "(напр. „Ситуационно решение“, „Водопровод“); "
+                                      "ако няма заглавие — кратко име по съдържанието"),
+                    "tekst": _s("целият текст на раздела, ДОСЛОВНО и без съкращения. "
+                                "Не преразказвай, не поправяй, не допълвай."),
+                    "stranica": {"type": "integer", "description": "страница в този файл"},
+                }},
+            },
             "chisla": {
                 "type": "array",
                 "description": "Числа, които после се сверяват с други документи: коти, площи, височини, "
@@ -265,6 +288,15 @@ UKAZANIE = f"""Четеш ОБЯСНИТЕЛНА ЗАПИСКА по една ч
 
 ЗП, РЗП, площта на имота, озеленяването, котата корниз и височината СА
 ПОКАЗАТЕЛИ — слагай ги в „priznaci“ със съответния код, не само в „chisla“.
+
+ОПИСАТЕЛНИТЕ БЛОКОВЕ са най-важното в това четене. Те влизат дословно в
+комплексния доклад и после в акт 15, окончателния доклад, акт 16 и техническия
+паспорт. Затова:
+  · преписвай ТОЧНО — без да съкращаваш, да поправяш правопис или да добавяш;
+  · по един блок на раздел от записката, с неговото подзаглавие;
+  · ако разделът е дълъг, пак го дай цял — дължината не е проблем;
+  · прескачай съдържание, челни листове, описи на чертежи, количествени сметки
+    и таблици с изчисления: те не влизат в доклад.
 
 КОТИТЕ И РЕПЕРЪТ са от ПРОЕКТА, не от замерване на терен:
   · kota_izkop, kota_cokul, kota_bilo, korniz_post — от АРХИТЕКТУРАТА
@@ -451,7 +483,8 @@ def vdigni_pokazateli(z):
 def _prazna(z):
     """Четене без нищо вътре — нито признак, нито материал, нито дори обект."""
     if any(z.get(k) for k in ("priznaci", "materiali", "instalacii", "chisla",
-                              "drug_proekt", "normi", "iziskvania", "chelen_list")):
+                              "drug_proekt", "normi", "iziskvania", "chelen_list",
+                              "opisanie_blokove")):
         return False
     return not any(str(z.get(k) or "").strip()
                    for k in ("obekt", "upi", "investitor", "proektant", "opisanie", "chast_ime"))
@@ -932,6 +965,20 @@ def rezyume(zapiski, vid="sgrada", ime_na_stroezha="", stari_identifikatori=()):
         "sobstvenici_ot_zapiski": sorted({
             str(v).strip() for z in zapiski for v in (z.get("vazlozhiteli") or [])
             if str(v or "").strip()}),
+        # Описателните блокове — подредени по части, не слети. Всеки носи
+        # откъде е, за да може операторът да го потвърди, преди да влезе в
+        # доклад. (15.10.2026)
+        "blokove": [{"chast": CHASTI.get(z.get("chast_kod"), z.get("chast_kod")),
+                     "chast_kod": z.get("chast_kod", ""),
+                     "fajl": z.get("fajl", ""),
+                     "razdeli": [{"podzaglavie": (b.get("podzaglavie") or "").strip(),
+                                  "tekst": (b.get("tekst") or "").strip(),
+                                  "stranica": b.get("stranica")}
+                                 for b in (z.get("opisanie_blokove") or [])
+                                 if isinstance(b, dict) and (b.get("tekst") or "").strip()]}
+                    for z in zapiski
+                    if any(isinstance(b, dict) and (b.get("tekst") or "").strip()
+                           for b in (z.get("opisanie_blokove") or []))],
         "materiali": saberi("materiali"),
         "instalacii": saberi("instalacii"),
         "chisla": saberi("chisla"),
