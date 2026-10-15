@@ -329,7 +329,10 @@ def shema_dokument(cheklist_redove):
                 "rolya": {"type": "string", "enum": ["възложител", "строител", "надзор",
                                                      "проектант", "технически ръководител", "друг"]},
                 "ime": _fakt("име на лицето или фирмата, буквално"),
-                "eik": _fakt("ЕИК / БУЛСТАТ"),
+                # ЕГН не се извлича — вж. rules/sobstvenost.py. Нотариалните
+                # актове и декларациите са пълни с ЕГН-та. (15.10.2026)
+                "eik": _fakt("ЕИК / БУЛСТАТ на юридическо лице. За физическо лице "
+                             "остави празно — ЕГН НЕ се попълва."),
                 "predstavlyavan_ot": _fakt("кой го представлява"),
                 "adres": _fakt("адрес на участника"),
             }, "required": ["rolya", "ime"]}},
@@ -691,6 +694,17 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None, edin
                   "rakopis_nenadezhden": not chetec.rakopis_nadezhden,
                   "zashto_rezerven": "; ".join(f"{k}: {v}" for k, v in prichini)})
         izhod.append(d)
+    # Последна врата срещу лични данни: каквото четецът все пак е върнал като
+    # ЕГН, не излиза оттук. (15.10.2026)
+    from .sobstvenost import e_egn
+    for d in (izhod if isinstance(izhod, list) else [izhod]):
+        for u in (d or {}).get("uchastnici") or []:
+            v = u.get("eik")
+            if e_egn(v.get("stoynost") if isinstance(v, dict) else v):
+                if isinstance(v, dict):
+                    v["stoynost"] = ""
+                else:
+                    u["eik"] = ""
     return izhod, {**info, "chetec": chetec.ime}
 
 
