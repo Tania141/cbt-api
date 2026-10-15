@@ -82,25 +82,36 @@ class Claude:
                           if isinstance(shema, dict) else None) or shema
         else:
             shema_edin = shema
+        # Серия от 11 акта обр. 7 в един файл не се побира в 4000. Вдигнат на
+        # 32 000 (15.10.2026): дългите записки с описателни блокове опираха в
+        # тавана и четецът изпускаше най-тежкото поле, без това да личи.
+        #
+        # При такъв таван клиентът ОТКАЗВА обикновена заявка — „Streaming is
+        # required for operations that may take longer than 10 minutes“ — и
+        # четенето падаше с грешка (операторът, 15.10.2026). Затова се чете
+        # поточно и се взима готовото съобщение.
+        zayavka = dict(
+            model=self.model, max_tokens=32000,
+            tools=[{"name": "zapishi_dokument",
+                    "description": ("Записва прочетеното от документа." if edin_dokument
+                                    else "Записва всички документи във файла наведнъж."),
+                    "input_schema": shema_edin}],
+            tool_choice={"type": "tool", "name": "zapishi_dokument"},
+            messages=[{"role": "user",
+                       "content": prep["blokove"] + [{"type": "text", "text": tekst}]}],
+        )
         try:
-            r = anthropic.Anthropic(api_key=self.api_key).messages.create(
-                # Серия от 11 акта обр. 7 в един файл не се побира в 4000.
-                # Вдигнат от 16 000 на 32 000 (15.10.2026): дългите записки с
-                # описателни блокове опираха в тавана и четецът изпускаше
-                # най-тежкото поле, без това да личи.
-                model=self.model, max_tokens=32000,
-                tools=[{"name": "zapishi_dokument",
-                        "description": ("Записва прочетеното от документа." if edin_dokument
-                                        else "Записва всички документи във файла наведнъж."),
-                        "input_schema": shema_edin}],
-                tool_choice={"type": "tool", "name": "zapishi_dokument"},
-                messages=[{"role": "user",
-                           "content": prep["blokove"] + [{"type": "text", "text": tekst}]}],
-            )
+            with anthropic.Anthropic(api_key=self.api_key).messages.stream(**zayavka) as potok:
+                r = potok.get_final_message()
         except anthropic.APIError as e:
             if _claude_ne_mozhe(e):
                 raise NeMozheSega(str(e)) from e
             raise
+        except ValueError as e:
+            # Клиентът отказва преди да е стигнал до мрежата — например
+            # „Streaming is required…“. Това не е повод цялото четене да падне:
+            # нека резервният четец опита. (15.10.2026)
+            raise NeMozheSega(str(e)) from e
         info = {"model": getattr(r, "model", self.model),
                 "tokens_in": r.usage.input_tokens, "tokens_out": r.usage.output_tokens}
         vhodove = [b.input for b in r.content if getattr(b, "type", "") == "tool_use"]
