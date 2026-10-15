@@ -85,7 +85,10 @@ class Claude:
         try:
             r = anthropic.Anthropic(api_key=self.api_key).messages.create(
                 # Серия от 11 акта обр. 7 в един файл не се побира в 4000.
-                model=self.model, max_tokens=16000,
+                # Вдигнат от 16 000 на 32 000 (15.10.2026): дългите записки с
+                # описателни блокове опираха в тавана и четецът изпускаше
+                # най-тежкото поле, без това да личи.
+                model=self.model, max_tokens=32000,
                 tools=[{"name": "zapishi_dokument",
                         "description": ("Записва прочетеното от документа." if edin_dokument
                                         else "Записва всички документи във файла наведнъж."),
