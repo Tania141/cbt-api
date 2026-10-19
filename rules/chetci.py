@@ -40,6 +40,11 @@ def _razcheti_spisak(tekst):
 
 # ── Claude ────────────────────────────────────────────────────────────────────
 
+# Колко чака Claude, преди да се предаде на резервния. Работникът има 600 с
+# (Procfile), така че остава време и за Mistral.
+CLAUDE_SROK = float(os.environ.get('CLAUDE_SROK', '180'))
+
+
 def _claude_ne_mozhe(e):
     import anthropic
     if isinstance(e, (anthropic.APIConnectionError, anthropic.APITimeoutError)):
@@ -101,7 +106,13 @@ class Claude:
                        "content": prep["blokove"] + [{"type": "text", "text": tekst}]}],
         )
         try:
-            with anthropic.Anthropic(api_key=self.api_key).messages.stream(**zayavka) as potok:
+            # Срокът е ПО-КРАТЪК от този на работника (gunicorn --timeout):
+            # иначе работникът умира пръв и резервният четец никога не
+            # се пробва — заявката се връща като „Failed to fetch“.
+            # (Операторът, 19.10.2026: две записки на .docx.)
+            klient = anthropic.Anthropic(api_key=self.api_key,
+                                         timeout=CLAUDE_SROK, max_retries=1)
+            with klient.messages.stream(**zayavka) as potok:
                 r = potok.get_final_message()
         except anthropic.APIError as e:
             if _claude_ne_mozhe(e):
