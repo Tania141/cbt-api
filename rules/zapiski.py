@@ -380,6 +380,46 @@ def _namiri(igla, kupa, ot=0):
     return -1
 
 
+_ZATVARYA = u".:;!?»“"
+_NOV_RED = re.compile(u"^(?:[-–—•·●■*]|"
+                      u"[0-9]+(?:\\.[0-9]+)*[.)]|[a-zA-Zа-я][.)]\\s)")
+
+
+def izgladi(tekst):
+    u"""Новият ред в PDF не е нов абзац.
+
+    Записката е набрана с твърди преноси по ширината на листа; шаблонът после
+    прави нов абзац на всеки нов ред и текстът излиза накъсан на парчета по
+    две-три думи. (Операторът, 16.10.2026: генерираният ОСИП — 140 от 301
+    реда под 60 знака.)
+
+    Нов абзац остава само там, където има празен ред, където предишният ред
+    завършва изречение или където следващият започва точка от списък.
+    """
+    redove = [r.strip() for r in str(tekst or "").replace(chr(13), chr(10)).split(chr(10))]
+    izhod = []
+    for r in redove:
+        if not r:
+            # Празният ред е край на абзаца, но не е празен абзац: шаблонът
+            # прави по един абзац на ред и празните изглеждат като дупки.
+            if izhod and izhod[-1]:
+                izhod.append("")
+            continue
+        if izhod and izhod[-1] == "":
+            izhod[-1] = r
+            continue
+        if (izhod and izhod[-1]
+                and izhod[-1][-1] not in _ZATVARYA
+                and not _NOV_RED.match(r)):
+            if izhod[-1].endswith(u"-"):          # пренос на дума
+                izhod[-1] = izhod[-1][:-1] + r
+            else:
+                izhod[-1] = izhod[-1] + " " + r
+        else:
+            izhod.append(r)
+    return chr(10).join(x for x in izhod).strip()
+
+
 def izreji_blokove(z, stranici):
     u"""Текстът на всеки блок се СРЯЗВА от записката, не се взима от четеца.
 
@@ -388,7 +428,13 @@ def izreji_blokove(z, stranici):
     каквото не се намери, остава както го е дал четецът.
     """
     blokove = z.get("opisanie_blokove") or []
-    if not blokove or not stranici:
+    if not blokove:
+        return 0
+    if not stranici:
+        # Скан: няма от какво да се реже, но преписът пак се сглобява.
+        for b in blokove:
+            if isinstance(b, dict) and b.get("tekst"):
+                b["tekst"] = izgladi(b["tekst"])
         return 0
     cyal = chr(10).join(stranici)
     tokeni = [(m.group(0).lower(), m.start(), m.end()) for m in _DUMA.finditer(cyal)]
@@ -406,11 +452,16 @@ def izreji_blokove(z, stranici):
         j = _namiri(k, dumi, i + len(n) - 1)
         if j < 0:
             continue
-        tekst = cyal[tokeni[i][1]:tokeni[j + len(k) - 1][2]].strip()
+        tekst = izgladi(cyal[tokeni[i][1]:tokeni[j + len(k) - 1][2]])
         if len(tekst) >= len(str(b.get("tekst") or "")) or not b.get("tekst"):
             b["tekst"] = tekst
             b["srezan"] = True
             srezani += 1
+    # И текстът, който НЕ е срязан (четецът го е преписал), минава през
+    # същото изглаждане — накъсаните редове са от PDF-а, не от срязването.
+    for b in blokove:
+        if isinstance(b, dict) and b.get("tekst"):
+            b["tekst"] = izgladi(b["tekst"])
     return srezani
 
 
