@@ -104,7 +104,15 @@ def main():
         print("  Скриптът очаква cloude/ до cbt-api/.")
         return 1
 
+    # PWA вече не е един файл: кодът ѝ е в cloude/js/*.js от 13.10.2026.
+    # Дотук четеше само index.html и затова виждаше 0 изпратени ключа —
+    # всичко излизаше като „никой не го пълни“. (19.10.2026)
     js = open(PWA, encoding="utf-8").read()
+    JS_DIR = os.path.join(os.path.dirname(PWA), "js")
+    if os.path.isdir(JS_DIR):
+        for f in sorted(os.listdir(JS_DIR)):
+            if f.endswith(".js"):
+                js += open(os.path.join(JS_DIR, f), encoding="utf-8").read()
     py = "".join(open(os.path.join(ROOT, f), encoding="utf-8").read()
                  for f in ("cbt_docx.py", "api.py"))
 
