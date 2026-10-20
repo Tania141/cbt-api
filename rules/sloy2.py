@@ -384,13 +384,24 @@ UKAZANIE = """Четеш документ от досието на строеж 
 - Ако нещо го няма или не се чете — остави празно. Не допълвай по догадка.
 - Отбележи „rakopisno“, когато стойността е написана на ръка.
 - В „pozovavania“ впиши ВСЕКИ друг документ, споменат с номер или дата: разрешение за строеж, одобрени проекти, протоколи, актове, заповедна книга, договори, нотариални актове, становища. Ако един и същ документ е споменат два пъти с различни данни — впиши и двете.
-- „cheklist_red“ избери от дадения списък само ако документът наистина е такъв; иначе празно.
+- „cheklist_red“ избери от дадения списък само ако документът наистина е такъв; иначе ПРАЗНО. Списъкът е от всички фази — визата, договорът за присъединяване и съгласуваните проекти са в него. По-добре празно, отколкото близък ред: „становище за пожарна безопасност“ НЕ е „становище за СКО“, а „виза за проектиране“ НЕ е „одобрен инвестиционен проект“.
 - „vid_kod“ избирай по значението, дадено в схемата. Договор за присъединяване към електрическа или водопроводна мрежа (ДПЕРМ, договор със Софийска вода и др.) НЕ е договор за строителство.
 - При нотариален акт попълни данните на акта (nomer, data, nt_tom, nt_reg, nt_delo, nt_notarius — името на нотариуса, nt_nk — номерът му в регистъра на Нотариалната камара), вписването в Службата по вписванията (vp_vh_reg, vp_akt, vp_tom, vp_delo — обикновено в печата на вписването) и „razpredelenie“ — кои обекти (апартаменти, гаражи, паркоместа, ателиета) на кой собственик остават. Всичко буквално.
 - При декларация или сертификат за строителен продукт попълни „material“ (материалът/изделието) и „proizvoditel“ (производител или доставчик) — буквално, както са написани; „nomer“ е номерът на декларацията, „data“ — датата на издаване.
 - „rolya“: възложител е собственикът/инвеститорът на строежа — той е и клиентът в договорите с ВиК и ЕРМ; строител е фирмата, която изпълнява строежа; надзор е консултантът.
 - „predmet“ и „za_drug_stroezh“: разрешение за ползване на външен кабел, уличен водопровод или канал е за ДРУГ строеж — неговите разрешения за строеж, протоколи и заповеди не са на сградата. Отбележи za_drug_stroezh = true.
 Запиши резултата с инструмента."""
+
+
+def _vsichki_redove():
+    u"""Всички редове на чеклиста, от всички фази.
+
+    Документът си е същият и преди разрешението, и при въвеждането —
+    фазата решава само кога се ИСКА. Подаден списък само за една фаза
+    принуждава четеца да налучква най-близкото. (20.10.2026)
+    """
+    from . import cheklist_dokumenti as chd
+    return [r["dokument"] for r in chd.chetene()]
 
 
 def _redove_za_faza(faza):
@@ -590,8 +601,8 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None, edin
     from .chetci import NeMozheSega
     ag = AGENDI[agenda]
     prep = podgotvi(ime, media_type, data_b64, stranici)
-    redove = _redove_za_faza(ag["faza"])
-    tekst = (UKAZANIE + f"\n\nФайл: {ime}\n\nРедове от чеклиста ({ag['zaglavie']}):\n"
+    redove = _vsichki_redove()
+    tekst = (UKAZANIE + f"\n\nФайл: {ime}\n\nРедове от чеклиста (всички фази):\n"
              + "\n".join(f"- {r}" for r in redove))
     raw = prep.get("raw") or base64.b64decode(data_b64)
     ostavashti, prichini = list(chetci), []
@@ -1153,8 +1164,10 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
     # 5. Чеклистът — кой ред кои файлове доказват.
     # Четене отпреди промяна в чеклиста може да сочи ред, който вече го няма
     # (16.09.2026: „Становища за СКО и СВО“ стана два реда) — не се предлага.
+    # „Старо четене“ е ред, който ВЕЧЕ ГО НЯМА в чеклиста — не ред от друга
+    # фаза. Документът, който доказва нещо за ОСИП, не е грешка при Акт 15.
     try:
-        segashni = set(_redove_za_faza(ag["faza"]))
+        segashni = set(_vsichki_redove())
     except Exception:
         segashni = None
     staro = lambda d: bool(d.get("cheklist_red")) and segashni is not None and d["cheklist_red"] not in segashni
@@ -1163,13 +1176,20 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
         r = d.get("cheklist_red")
         if not r or staro(d):
             continue
-        e = po_red.setdefault(r, {"dokument": r, "nomer": "", "fajlove": [], "sken": False})
+        e = po_red.setdefault(r, {"dokument": r, "nomer": "", "fajlove": [],
+                                  "sken": False, "dokazano_ot": []})
         if d.get("fajl", "") not in e["fajlove"]:
             e["fajlove"].append(d.get("fajl", ""))
         e["sken"] = e["sken"] or bool(d.get("sken"))
+        n, dt = _st(d.get("nomer")), n_data(_st(d.get("data")))
+        nomer = " от ".join(x for x in (f"№ {n}" if n else "", _dd(dt) if dt else "") if x)
+        # Един ред може да е доказан от НЯКОЛКО документа. Дотук се показваше
+        # номерът на ПЪРВИЯ до името на последния файл и изглеждаше разменено.
+        # (Операторът, 20.10.2026.) Затова всеки документ си носи своето.
+        e["dokazano_ot"].append({"fajl": d.get("fajl", ""), "nomer": nomer,
+                                 "vid": _st(d.get("vid")), "sken": bool(d.get("sken"))})
         if not e["nomer"]:
-            n, dt = _st(d.get("nomer")), n_data(_st(d.get("data")))
-            e["nomer"] = " от ".join(x for x in (f"№ {n}" if n else "", _dd(dt) if dt else "") if x)
+            e["nomer"] = nomer
     cheklist = None
     if priznaci is not None:
         from . import cheklist_dokumenti as chd
