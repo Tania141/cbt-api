@@ -185,7 +185,37 @@ def _faza_na_razdel(razdel):
     return None
 
 
-def spisak(priznaci, nalichni=None, faza=None, neotnasya=None):
+def _redove_sas_sobstveni(sobstveni):
+    """Редовете от заключения файл плюс одобрените от оператора.
+
+    Прочетен документ без ред се пази като КАНДИДАТ и чака; одобри ли го
+    операторът, той става ред тук — без да се пипа заключеният източник.
+    Собственият ред си личи (`sobstven`), за да се знае откъде е.
+    (Операторът, 20.10.2026: „всеки документ, който четецът прочете и не е
+    част от листата, да го добавя — така с времето ще имаме по-пълна
+    картина“.)
+    """
+    redove = chetene()
+    imena = {r["dokument"].strip().lower() for r in redove}
+    for r in (sobstveni or []):
+        ime = str((r or {}).get("dokument", "")).strip()
+        if not ime or ime.lower() in imena:
+            continue
+        imena.add(ime.lower())
+        redove.append({
+            "razdel": r.get("razdel") or "До разрешение за строеж — всички строежи",
+            "dokument": ime,
+            "uslovie": str(r.get("uslovie") or "ако_е_приложимо"),
+            "grupa": "",
+            "dokazva_se": str(r.get("dokazva_se") or "номер и дата"),
+            "osnovanie": str(r.get("osnovanie") or "добавен от оператора"),
+            "etap": "начало" if r.get("etap") == "начало" else "подпис",
+            "sobstven": True,
+        })
+    return redove
+
+
+def spisak(priznaci, nalichni=None, faza=None, neotnasya=None, sobstveni=None):
     """Кои документи се изискват за този обект и налице ли са.
 
     `nalichni` — вписаните документи: {"dokument", "nomer"}; съвпадение по име.
@@ -203,7 +233,7 @@ def spisak(priznaci, nalichni=None, faza=None, neotnasya=None):
     neot = {str(x).strip().lower() for x in (neotnasya or []) if str(x).strip()}
 
     izhod = []
-    for red in chetene():
+    for red in _redove_sas_sobstveni(sobstveni):
         fr = _faza_na_razdel(red["razdel"])
         if faza and fr and fr != faza:
             continue

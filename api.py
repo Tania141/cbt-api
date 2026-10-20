@@ -1341,6 +1341,34 @@ def izvori_sastoyanie():
                     "vsichki_nalice": not lipsvat})
 
 
+def _sobstveni_redove():
+    """Редовете, които операторът сам е добавил — от tenant_danni.
+
+    Заключеният файл с чеклиста остава непокътнат: собствените редове се
+    четат отделно и се сливат при справката. (20.10.2026)
+    """
+    tenant_id = request.current_user.get("tenant_id") if request.current_user else None
+    if not tenant_id:
+        return []
+    conn = get_db()
+    if not conn:
+        return []
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT stoynost FROM tenant_danni "
+                            "WHERE tenant_id = %s AND klyuch = %s",
+                            (tenant_id, "cheklist_sobstveni"))
+                red = cur.fetchone()
+    except Exception as e:
+        print(f"_sobstveni_redove: {type(e).__name__}: {e}", flush=True)
+        return []
+    finally:
+        conn.close()
+    stoynost = red["stoynost"] if red else None
+    return stoynost if isinstance(stoynost, list) else []
+
+
 @app.route("/api/cheklist", methods=["POST"])
 @require_auth
 def cheklist_dokumenti():
@@ -1367,7 +1395,12 @@ def cheklist_dokumenti():
 
     rezultat = chd.spisak(priznaci, nalichni,
                           faza=(body.get("faza") or None),
-                          neotnasya=body.get("neotnasya") or [])
+                          neotnasya=body.get("neotnasya") or [],
+                          # Базата е истината; подаденото от браузъра върши
+                          # работа, когато записът към нея не е минал.
+                          sobstveni=(_sobstveni_redove()
+                                     or (body.get("sobstveni") if isinstance(
+                                         body.get("sobstveni"), list) else [])))
     log_action("cheklist", user_id=request.current_user["sub"],
                tenant_id=request.current_user.get("tenant_id"),
                detail={"lipsvat": rezultat.get("lipsvat")})
@@ -1949,7 +1982,11 @@ def cloud_load():
 #
 # Нарочно НЕ е свободно килерче: ключът се проверява срещу списък, за да не се
 # превърне в място, където всеки запише каквото му хрумне.
-DANNI_KLYUCHOVE = ("konsultanti", "istoria")
+# „kandidati“ — прочетени документи, за които НЯМА ред в чеклиста: пазят се с
+# брой и съставки, докато операторът реши. „cheklist_sobstveni“ — редовете,
+# които той е одобрил. Заключеният източник не се пипа; собствените редове
+# се добавят към него и си личат. (Операторът, 20.10.2026.)
+DANNI_KLYUCHOVE = ("konsultanti", "istoria", "kandidati", "cheklist_sobstveni")
 
 
 def _danni_proverka(klyuch):
