@@ -158,6 +158,21 @@ def razberi_stranici(tekst, n):
     return izbor
 
 
+# Текстът на един абзац ЗАЕДНО с формулите в него.
+#
+# Формулите в Word са отделен обект (OMML, `m:oMath`) и `p.text` ги
+# пропуска мълчаливо. Така от „допустимият ток на нагряване е Iдоп = 338 A“
+# оставаше „допустимият ток на нагряване е .“ — изречение без числото.
+# (Операторът, 20.10.2026.)
+_W_T = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
+_M_T = "{http://schemas.openxmlformats.org/officeDocument/2006/math}t"
+
+
+def _abzac_tekst(p):
+    parcheta = [v.text or "" for v in p._p.iter() if v.tag in (_W_T, _M_T)]
+    return "".join(parcheta)
+
+
 def podgotvi(ime, media_type, data_b64, stranici=None):
     """Файлът → блокове за модела + текстът по страници за сверката.
 
@@ -178,7 +193,7 @@ def podgotvi(ime, media_type, data_b64, stranici=None):
     if ext == ".docx" or "wordprocessingml" in (media_type or ""):
         from docx import Document
         d = Document(io.BytesIO(raw))
-        chasti = [p.text for p in d.paragraphs]
+        chasti = [_abzac_tekst(p) for p in d.paragraphs]
         for t in d.tables:
             for red in t.rows:
                 chasti.append(" | ".join(c.text for c in red.cells))
