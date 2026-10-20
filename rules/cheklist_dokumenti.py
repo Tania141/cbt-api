@@ -24,6 +24,7 @@ import os, re, json, hashlib, glob
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_DIR)
 LOCK = os.path.join(_DIR, "cheklist_dokumenti.lock.json")
+EDNO_OT = "едно от:"
 
 # Първо папката на оператора — за да печели това, което тя току-що е поправила.
 # После копието в хранилището: то е единственото, което стига до Railway.
@@ -76,12 +77,24 @@ def _tablici(tekst):
                     break
                 k = [x.strip() for x in r.strip().strip("|").split("|")]
                 if k and k[0]:
+                    uslovie = (k[1] if len(k) > 1 else "").strip() or "винаги"
+                    # „едно от: <име>“ — два реда се доказват взаимно и стига
+                    # единият: виза за проектиране ИЛИ подробен устройствен
+                    # план. (Операторът, 20.10.2026.)
+                    grupa = ""
+                    if uslovie.startswith(EDNO_OT):
+                        grupa = uslovie[len(EDNO_OT):].strip()
+                        uslovie = "винаги"
                     izhod.append({
                         "razdel": razdel,
                         "dokument": k[0],
-                        "uslovie": (k[1] if len(k) > 1 else "").strip() or "винаги",
+                        "uslovie": uslovie,
+                        "grupa": grupa,
                         "dokazva_se": k[2] if len(k) > 2 else "",
                         "osnovanie": k[3] if len(k) > 3 else "",
+                        # Етапът: без „начало“ не може да се ЗАПОЧНЕ, без
+                        # „подпис“ — да се приключи. По подразбиране: подпис.
+                        "etap": (k[4].strip() if len(k) > 4 and k[4].strip() else "подпис"),
                     })
     return izhod
 
@@ -216,11 +229,33 @@ def spisak(priznaci, nalichni=None, faza=None, neotnasya=None):
             continue
         izhod.append({**red, "precenka": precenka,
                       "sastoyanie": "за преценка" if precenka else "не е доказано"})
+    # Групите „едно от“: доказан ли е един ред, останалите не се изискват.
+    dokazani = {r.get("grupa") for r in izhod
+                if r.get("grupa") and r["sastoyanie"] == "налице"}
+    if dokazani:
+        for r in izhod:
+            if r.get("grupa") in dokazani and r["sastoyanie"] != "налице":
+                r["sastoyanie"] = "не се изисква"
+                r["dokazan_ot_grupata"] = True
+
+    # ДВЕ ЧИСЛА, НЕ ЕДНО. „Мога ли да започна“ и „мога ли да подпиша“ са
+    # различни въпроси; събрани в едно число, то не значи нищо.
+    # (Операторът, 20.10.2026.)
+    def gotovnost(etap):
+        redove = [r for r in izhod if r.get("etap", "подпис") == etap
+                  and r["sastoyanie"] in ("налице", "не е доказано")]
+        ima = sum(r["sastoyanie"] == "налице" for r in redove)
+        return {"ot": len(redove), "ima": ima, "lipsvat": len(redove) - ima,
+                "procent": round(100 * ima / len(redove)) if redove else 100,
+                "nyama": [r["dokument"] for r in redove if r["sastoyanie"] != "налице"]}
+
     return {"redove": izhod,
             "faza": faza,
             "iziskvani": sum(r["sastoyanie"] in ("налице", "не е доказано") for r in izhod),
             "lipsvat": sum(r["sastoyanie"] == "не е доказано" for r in izhod),
-            "za_precenka": sum(r["sastoyanie"] == "за преценка" for r in izhod)}
+            "za_precenka": sum(r["sastoyanie"] == "за преценка" for r in izhod),
+            "da_zapochna": gotovnost("начало"),
+            "da_podpisha": gotovnost("подпис")}
 
 
 if __name__ == "__main__":
