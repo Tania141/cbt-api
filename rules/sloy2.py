@@ -1134,7 +1134,7 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
     dd = {kl: _dd(naj[k][0]) for k, kl in (("PROTOKOL2", "protokol2"), ("ZK", "zk_zaverka"),
                                              ("AKT14", "akt14"), ("AKT15", "akt15")) if k in naj}
     proekt = {"docDates": dd, "РС_ВСила": pasport.get("rs_v_sila", ""), "vid": "sgrada"}
-    for r in (D.rs_tri_godini, D.zk_tri_dni, D.grub_stroezh):
+    for r in (D.rs_tri_godini, D.zk_tri_dni, D.obrazec3_edin_mesec, D.grub_stroezh):
         v = r.run(proekt)
         if v.status != UNKNOWN:
             hron.append({"status": v.status, "tekst": f"{r.code} {r.title}: {v.message}",

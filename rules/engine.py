@@ -103,6 +103,14 @@ def years_after(d, years):
         return d.replace(year=d.year + years, day=28)
 
 
+def months_after(d, months):
+    """Същата дата след N месеца; 31-ви пада на последния ден от месеца."""
+    import calendar
+    m = d.month - 1 + months
+    g, m = d.year + m // 12, m % 12 + 1
+    return d.replace(year=g, month=m, day=min(d.day, calendar.monthrange(g, m)[1]))
+
+
 def run_all(project):
     return [r.run(project) for r in ALL_RULES]
 
