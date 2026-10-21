@@ -1176,6 +1176,32 @@ def sravni(dokumenti, pasport=None, agenda="od", priznaci=None, neotnasya=None, 
             hron.append({"status": WARN, "tekst": f"„{d.get('vid') or d.get('fajl')}“ е с дата "
                                                    f"{_dd(x)} — в бъдещето ({d.get('fajl')})"})
 
+    # ДЕКЛАРАЦИЯТА ЗА МАТЕРИАЛ НЕ МОЖЕ ДА Е ПО-КЪСНА ОТ ПРИЕМАНЕТО.
+    # Операторът, 21.10.2026: „често не се внимава от коя година са
+    # декларациите за материали — въобще, не само за бетон и армировка“.
+    # Материалът се влага ПРЕДИ да бъде приет актът; декларация, издадена след
+    # него, или е за друг строеж, или е извадена наготово по-късно. Сравнява се
+    # с най-ранния акт, който приема работата: Акт 14 за конструкцията, иначе
+    # Акт 15.
+    prieman = naj.get("AKT14") or naj.get("AKT15")
+    if prieman:
+        kasni = []
+        for d in dokumenti:
+            if d.get("vid_kod") != "DEKLARACIA":
+                continue
+            x = n_data(_st(d.get("data")))
+            if x and x > prieman[0]:
+                kakvo = _st(d.get("material")) or _st(d.get("vid")) or d.get("fajl", "")
+                nomer = _st(d.get("nomer"))
+                kasni.append(f"{kakvo}{' № ' + nomer if nomer else ''} — {_dd(x)}")
+        if kasni:
+            ime_akt = "Акт 14" if naj.get("AKT14") else "Акт 15"
+            hron.append({"status": WARN,
+                         "tekst": f"{len(kasni)} декларации са с дата СЛЕД {ime_akt} "
+                                  f"({_dd(prieman[0])}) — материалът се влага преди приемането: "
+                                  + "; ".join(kasni[:6])
+                                  + (f" и още {len(kasni) - 6}" if len(kasni) > 6 else "")})
+
     # 5. Чеклистът — кой ред кои файлове доказват.
     # Четене отпреди промяна в чеклиста може да сочи ред, който вече го няма
     # (16.09.2026: „Становища за СКО и СВО“ стана два реда) — не се предлага.
