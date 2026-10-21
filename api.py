@@ -1401,10 +1401,20 @@ def cheklist_dokumenti():
                           sobstveni=(_sobstveni_redove()
                                      or (body.get("sobstveni") if isinstance(
                                          body.get("sobstveni"), list) else [])))
+    # Лицензът на строителя срещу категорията на строежа. Регистърът на
+    # Камарата не се сваля като файл, затова се сверява ВПИСАНОТО. Празно
+    # значи „още не е въведено“ — казва се, не се мълчи. (21.10.2026)
+    from rules import cprs
+    licenz = cprs.proveri(d.get("Категория_Номер", ""),
+                          {"nomer": d.get("Строител_ЦПРС", ""),
+                           "valid_do": d.get("Строител_ЦПРС_Валидно", ""),
+                           "grupi": d.get("Строител_ЦПРС_Групи", ""),
+                           "kategorii": d.get("Строител_ЦПРС_Категории", "")},
+                          vid=d.get("Вид", ""))
     log_action("cheklist", user_id=request.current_user["sub"],
                tenant_id=request.current_user.get("tenant_id"),
                detail={"lipsvat": rezultat.get("lipsvat")})
-    return jsonify({**rezultat, "priznaci": priznaci})
+    return jsonify({**rezultat, "priznaci": priznaci, "licenz_stroitel": licenz})
 
 
 # ── Надзорът: протоколите по ред, всеки със своя чеклист ─────────────────────
