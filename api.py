@@ -940,27 +940,13 @@ def create_invite():
         conn.close()
 
 
-@app.route("/api/audit", methods=["GET"])
-def get_audit_quick():
-    conn = get_db()
-    if not conn:
-        return jsonify({"error": "PostgreSQL не е конфигуриран"}), 503
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id, created_at, action, doc_type, status,
-                       tokens_in, tokens_out, tenant_id, detail
-                FROM audit_log
-                ORDER BY created_at DESC
-                LIMIT 20
-            """)
-            rows = [dict(r) for r in cur.fetchall()]
-        return jsonify({"audit": rows, "count": len(rows)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        conn.close()
-
+# `/api/audit` беше тук и стоеше БЕЗ `@require_auth` — всеки можеше да прочете
+# последните двайсет действия на всички наематели: кой, какво, кога. Открито на
+# 23.10.2026, докато проверявахме дневника след пробива в Railway: отворих го
+# отвън, без никаква парола, за секунди.
+#
+# Махнат, не закърпен: нищо в PWA-то не го викаше, а същото го има в
+# `/api/admin/audit-log` — с проверка за администратор и с филтри.
 
 @app.route("/api/passports", methods=["GET"])
 @require_auth
