@@ -163,7 +163,14 @@ def _edno_uslovie(izraz, pr):
 
 
 def prilozhim(uslovie, pr):
-    return all(_edno_uslovie(x, pr) for x in uslovie.split(" и "))
+    """„а и б“ — и двете; „а или б“ — поне едното. „и“ е по-силно разделено.
+
+    „Или“ го иска наученото от оператора (27.10.2026): ред, видян при шахтов ТП
+    и при БКТП, важи при единия ИЛИ при другия. Без него условието трябваше да
+    е или твърде тясно (и двете съставки), или твърде широко („вид = линеен“).
+    """
+    return all(any(_edno_uslovie(y, pr) for y in x.split(" или "))
+               for x in uslovie.split(" и "))
 
 
 # Разделите на файла са фазите (операторът, 11.09.2026): „До разрешение…“ —
@@ -204,10 +211,28 @@ def _redove_sas_sobstveni(sobstveni):
         if not ime or ime.lower() in imena:
             continue
         imena.add(ime.lower())
+        uslovie = str(r.get("uslovie") or PRECENKA)
+        # ПОПРАВКА НА СТАРИТЕ УРОЦИ (27.10.2026).
+        # До тази дата условието се пишеше „вид = линеен“ — а признаците не
+        # носеха вида, тоест редът НИКОГА не ставаше приложим: научено, което
+        # мълчи. Съставките, при които е видян, се пазеха през цялото време;
+        # тук условието се прави от тях, вместо урокът да остане мъртъв.
+        sast = [str(x).strip() for x in (r.get("sastavki") or []) if str(x).strip()]
+        #
+        # Няма ли запазени съставки, мъртвата част просто се маха: редът
+        # излиза ЗА ПРЕЦЕНКА навсякъде. Операторът го е одобрил — по-добре
+        # въпрос, който може да отрече, отколкото ред, който не излиза никога.
+        if "вид = " in uslovie:
+            if sast:
+                uslovie = " и ".join([" или ".join("sast_" + x for x in sast), PRECENKA])
+            else:
+                chasti = [x.strip() for x in uslovie.split(" и ")
+                          if "вид = " not in x and x.strip()]
+                uslovie = " и ".join(chasti) or PRECENKA
         redove.append({
             "razdel": r.get("razdel") or "До разрешение за строеж — всички строежи",
             "dokument": ime,
-            "uslovie": str(r.get("uslovie") or "ако_е_приложимо"),
+            "uslovie": uslovie,
             "grupa": "",
             "dokazva_se": str(r.get("dokazva_se") or "номер и дата"),
             "osnovanie": str(r.get("osnovanie") or "добавен от оператора"),
