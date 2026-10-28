@@ -422,6 +422,39 @@ UKAZANIE = """Четеш документ от досието на строеж 
 Запиши резултата с инструмента."""
 
 
+# ВРЪЗВАНЕ ПО ЗАГЛАВИЕ, когато четецът не е вързал ред.
+#
+# Операторът, 28.10.2026: прочетено „Разрешение за строеж № 277/02.11.2023г.“
+# излезе с „няма ред в чеклиста“, макар редът „Разрешение за строеж“ да е в
+# списъка, подаден на четеца. Падна резервният четец и той не го избра.
+#
+# Указанието нарочно казва „по-добре празно, отколкото близък ред“ — и това е
+# вярно за преценка по СМИСЪЛ. Но когато заглавието ЗАПОЧВА с името на реда,
+# не се преценява нищо: това е същият документ.
+#
+# Затова: само НАЧАЛО, не съдържане. „Заповед за допълване на разрешение за
+# строеж“ съдържа реда, но не започва с него — и не се връзва. И само когато
+# един-единствен ред пасва; при две — мълчим.
+def _red_po_zaglavie(d, redove):
+    def n(x):
+        x = str(x or "").lower().replace(" ", " ")
+        return " ".join(x.replace("„", "").replace("“", "").split())
+
+    zaglavia = [n(d.get("vid")), n((d.get("naimenovanie") or {}).get("stoynost"))]
+    for z in zaglavia:
+        if not z:
+            continue
+        pasvat = [r for r in redove if n(r) and z.startswith(n(r))]
+        if len(pasvat) == 1:
+            return pasvat[0], "системата — по заглавието на документа"
+        if len(pasvat) > 1:                      # два реда пасват → не гадаем
+            najdalgiyat = max(pasvat, key=lambda r: len(n(r)))
+            drugi = [r for r in pasvat if r != najdalgiyat]
+            if all(n(najdalgiyat).startswith(n(r)) for r in drugi):
+                return najdalgiyat, "системата — по заглавието на документа"
+    return "", ""
+
+
 def _vsichki_redove():
     u"""Всички редове на чеклиста, от всички фази.
 
@@ -701,6 +734,10 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None, edin
             d["vid_kod"] = "DRUGO"
         if d.get("cheklist_red") not in redove:
             d["cheklist_red"] = ""
+        if not d["cheklist_red"]:
+            red, kak = _red_po_zaglavie(d, redove)
+            if red:
+                d["cheklist_red"], d["red_ot"] = red, kak
         for p in d.get("pozovavania") or []:
             if p.get("vid_kod") not in VIDOVE:
                 p["vid_kod"] = "DRUGO"
