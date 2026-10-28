@@ -1521,10 +1521,18 @@ def sloy2_chete():
         nalichni = [c for c in nalichni if c.kod == izbor]
         if not nalichni:
             return jsonify({"greshka": f"четецът „{izbor}“ не е настроен на сървъра — няма ключ за него"})
+    # ИЗБРАН ≠ РЕЗЕРВЕН. Операторът, 28.10.2026: месеци наред всичко се е чело
+    # с Mistral, защото при една проба изборът е останал в браузъра. Документът
+    # пишеше „Mistral (резервен)“ — а той не беше резервен, беше ИЗБРАНИЯТ, и
+    # основният никога не е бил опитван. Затова `zashto_rezerven` беше празно:
+    # нищо не се е провалило. Тук се записва изборът, за да не лъже надписът.
+    izbran = "" if izbor == "auto" else izbor
     try:
         dokumenti, info = sloy2.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
                                          f.get("data", ""), agenda=agenda, stranici=body.get("stranici"),
                                          edin=bool(body.get("edin")))
+        for d in dokumenti:
+            d["chetec_izbran"] = izbran
         dok = dokumenti[0]
     except sloy2.NeSeChete as e:
         return jsonify({"greshka": str(e)})
