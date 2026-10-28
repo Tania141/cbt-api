@@ -441,6 +441,25 @@ def _red_po_zaglavie(d, redove):
         return " ".join(x.replace("„", "").replace("“", "").split())
 
     zaglavia = [n(d.get("vid")), n((d.get("naimenovanie") or {}).get("stoynost"))]
+
+    # ПРИЛОЖЕНИЕ № N КЪМ ЧЛ. 7, АЛ. 3 → АКТ/ПРОТОКОЛ ОБР. N.
+    # Операторът, 28.10.2026: скан, озаглавен „Приложение № 2 към чл. 7, ал. 3,
+    # т. 2, (Образец 2)“, излезе с „няма ред в чеклиста“. Това е самото
+    # заглавие на образците по Наредба № 3 — номерът на приложението Е номерът
+    # на образеца. Не се гадае, преписва се.
+    #
+    # Връзва се само когато ЕДИН ред носи този номер; и номерът се търси като
+    # цяло число, за да не хване „обр. 1“ в „обр. 15“.
+    for z in zaglavia:
+        m = re.search(r"приложение\s*№?\s*(\d+)\s*[а-я]?\s*към\s*чл\.?\s*7", z or "")
+        if not m:
+            continue
+        nomer = m.group(1)
+        pasvat = [r for r in redove
+                  if re.search(r"обр\.?\s*" + nomer + r"(?!\d)", n(r))]
+        if len(pasvat) == 1:
+            return pasvat[0], f"системата — приложение № {nomer} по Наредба № 3"
+
     for z in zaglavia:
         if not z:
             continue
