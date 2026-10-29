@@ -446,6 +446,31 @@ UKAZANIE = """Четеш документ от досието на строеж 
 # Затова: само НАЧАЛО, не съдържане. „Заповед за допълване на разрешение за
 # строеж“ съдържа реда, но не започва с него — и не се връзва. И само когато
 # един-единствен ред пасва; при две — мълчим.
+# ПРИЛОЖЕНИЕ № N КЪМ ЧЛ. 7, АЛ. 3 → АКТ/ПРОТОКОЛ ОБР. N.
+#
+# Това НЕ е преценка, а факт, написан на самия документ — затова бие избора на
+# четеца. На 29.10.2026 акт обр. 14, озаглавен „Приложение № 14 към чл. 7,
+# ал. 3, т. 14 (Образец 14)“, излезе вързан за реда „Документи за участниците
+# в строителството“: моделът беше избрал ред, редът съществуваше в чеклиста, и
+# правилото изобщо не се пускаше — то се вика само когато четецът мълчи.
+def _red_po_prilozhenie(d, redove):
+    def n(x):
+        x = str(x or "").lower().replace(" ", " ")
+        return " ".join(x.replace("„", "").replace("“", "").split())
+
+    for z in (n(d.get("vid")), n((d.get("naimenovanie") or {}).get("stoynost"))):
+        m = re.search(r"приложение\s*№?\s*(\d+)\s*[а-я]?\s*към\s*чл\.?\s*7", z or "")
+        if not m:
+            continue
+        nomer = m.group(1)
+        # Номерът се търси като цяло число, за да не хване „обр. 1“ в „обр. 15“.
+        pasvat = [r for r in redove
+                  if re.search(r"обр\.?\s*" + nomer + r"(?!\d)", n(r))]
+        if len(pasvat) == 1:
+            return pasvat[0], "системата — приложение № %s по Наредба № 3" % nomer
+    return "", ""
+
+
 def _red_po_zaglavie(d, redove):
     def n(x):
         x = str(x or "").lower().replace(" ", " ")
@@ -792,6 +817,11 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None, edin
             d["vid_kod"] = "DRUGO"
         if d.get("cheklist_red") not in redove:
             d["cheklist_red"] = ""
+        # Номерът на приложението е факт от самия документ — той бие избора на
+        # четеца, а не го чака да замълчи.
+        red, kak = _red_po_prilozhenie(d, redove)
+        if red:
+            d["cheklist_red"], d["red_ot"] = red, kak
         if not d["cheklist_red"]:
             red, kak = _red_po_zaglavie(d, redove)
             if red:
