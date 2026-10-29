@@ -20,7 +20,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from docx import Document
 
-from cbt_docx import _spisak_ili_tochki
+from cbt_docx import _spisak_ili_tochki, mahni_markeri
 
 PAT = os.path.join(os.path.dirname(__file__), "..", "templates", "Akt_15_Template.docx")
 dobri, loshi = [], []
@@ -96,6 +96,15 @@ t("редовете излизат с тире",
 t("празните редове се махат",
   _spisak_ili_tochki("\n\nАкт 5\n\n") == "- Акт 5")
 t("None не гърми", _spisak_ili_tochki(None).startswith("...."))
+
+# ── маркерите на шаблона не отиват на хартия ────────────────────────────────
+# 29.10.2026: операторът генерира Акт 15 и „===ТЕХНИЧЕСКО_НАЧАЛО===“ излезе
+# между разделите и описанието, в документ за подпис.
+d = Document(PAT)
+t("шаблонът пази маркерите за кода", mahni_markeri(d) == 2)
+ostali = [p.text for p in d.paragraphs if "===" in p.text]
+t("след махането ги няма", not ostali, ostali)
+t("а останалото си стои", any("Строежът представлява" in p.text for p in d.paragraphs))
 
 for x in dobri:
     print("  ok  " + x)

@@ -462,8 +462,10 @@ def generate_from_template(template_name, replacements):
     fill_template(doc, replacements)
     # Всеки документ е работно копие до подписа — липсващото се вижда жълто.
     # (Операторът, 09.10.2026)
-    from cbt_docx import marker_lipsvashto
+    from cbt_docx import marker_lipsvashto, mahni_markeri
     marker_lipsvashto(doc)
+    # Вътрешните маркери на шаблона не отиват на хартия.
+    mahni_markeri(doc)
     buf = io.BytesIO(); doc.save(buf); return buf.getvalue()
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
@@ -1237,8 +1239,10 @@ def generate_od_ai():
         tehn = doklad_sloy2.vmukni_tehnichesko(doc, str(body.get("tehnichesko") or ""))
         if not tehn:
             rez["prichini"].append("Раздел Б: няма записано техническо описание на строежа — остава заместителят.")
-        from cbt_docx import marker_lipsvashto as _marker
+        from cbt_docx import marker_lipsvashto as _marker, mahni_markeri
         marker = _marker(doc)
+        # Ако няма техническо описание, маркерите остават — тук се махат.
+        mahni_markeri(doc)
         if marker:
             rez["prichini"].insert(0, f"{marker} места в доклада са празни и са МАРКИРАНИ ЖЪЛТО — "
                                       "те се попълват, преди да се разпечата и подпише.")

@@ -2,6 +2,7 @@
 cbt_docx.py — Document-building helpers for АКТ СИСТЕМ.
 Extracted from api.py (refactor only, no behavior change).
 """
+import re
 from datetime import datetime
 from copy import deepcopy
 from docx import Document
@@ -990,6 +991,27 @@ def _marker_prazno(para):
                 n += 1
             except Exception:
                 pass
+    return n
+
+
+# Вътрешните маркери на шаблоните (`===ТЕХНИЧЕСКО_НАЧАЛО===`) служат на кода:
+# по тях се изрязва техническото описание от Акт 15 и се вмъква в ОД. В
+# ПОДПИСВАН документ не им е мястото — на 29.10.2026 операторът генерира Акт 15
+# и двата маркера излязоха на хартията между разделите и описанието.
+#
+# Махат се накрая, след като всеки, който ги търси, е свършил. Изрязването от
+# готов Акт 15 не страда: `izrezhi_tehnichesko` има втори път — от „Строежът
+# представлява“ до „Въз основа на горните констатации“.
+_MARKER = re.compile(r"^===[A-ZА-Я_]+===$")
+
+
+def mahni_markeri(doc):
+    """Изтрива параграфите, които са само вътрешен маркер. Връща колко са."""
+    n = 0
+    for para in list(doc.paragraphs):
+        if _MARKER.match((para.text or "").strip()):
+            para._p.getparent().remove(para._p)
+            n += 1
     return n
 
 
