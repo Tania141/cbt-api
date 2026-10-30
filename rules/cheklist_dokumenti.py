@@ -242,6 +242,50 @@ def _redove_sas_sobstveni(sobstveni):
     return redove
 
 
+# ── ТРИТЕ ОСИ ────────────────────────────────────────────────────────────────
+# АТ, 30.10.2026: „да се разделят три различни въпроса“. Дотук състоянието беше
+# ЕДНА ос с пет стойности — „не се изисква / не се отнася / не е доказано /
+# налице / за преценка“ — и в нея се биеха три несвързани неща.
+#
+# Колко струва смесването, се видя същия ден на истински линеен обект: липсващ
+# акт обр. 7 за фундамента на БКТП изглеждаше точно като липсващ акт обр. 14,
+# който наистина не се отнася. Едното беше пропуск, другото — вярно. Разликата
+# нямаше къде да се запише.
+#
+# Старото `sastoyanie` остава, но вече се ИЗВЕЖДА от осите — един извор, за да
+# не се разминат. Екраните, които още го четат, не усещат нищо.
+PRILOZHIMOST = ("изисква се", "не е приложимо", "условно приложимо", "не е поискано")
+NALICHIE = ("намерено", "липсва", "частично намерено", "не е проверено")
+PRIEMANE = ("потвърдено", "потвърдено с предупреждение", "отхвърлено", "в конфликт")
+
+
+def osi(prilozhimost, nalichie, zashto="", priemane=""):
+    u"""Трите оси на един ред. `zashto` пази КОЕ прави реда неприложим —
+    условието, операторът или друг ред от групата; без него старото състояние
+    не може да се изведе обратно."""
+    assert prilozhimost in PRILOZHIMOST, prilozhimost
+    assert nalichie in NALICHIE, nalichie
+    assert priemane in PRIEMANE or priemane == "", priemane
+    return {"prilozhimost": prilozhimost, "nalichie": nalichie,
+            "priemane": priemane, "zashto": zashto}
+
+
+def sastoyanie_ot_osite(o):
+    u"""Старото едно състояние, изведено от трите оси."""
+    if o["prilozhimost"] == "не е приложимо":
+        return "не се отнася" if o["zashto"] == "оператор" else "не се изисква"
+    if o["prilozhimost"] == "условно приложимо":
+        return "за преценка"
+    if o["zashto"] == "група":
+        return "не се изисква"
+    return {"намерено": "налице", "частично намерено": "не е доказано"}.get(
+        o["nalichie"], "не е доказано")
+
+
+def _red(red, o, **ostalo):
+    return {**red, "osi": o, "sastoyanie": sastoyanie_ot_osite(o), **ostalo}
+
+
 def spisak(priznaci, nalichni=None, faza=None, neotnasya=None, sobstveni=None):
     """Кои документи се изискват за този обект и налице ли са.
 
@@ -249,7 +293,9 @@ def spisak(priznaci, nalichni=None, faza=None, neotnasya=None, sobstveni=None):
     `faza` — "osip" или "od": само разделите за тази фаза; без нея — всички.
     `neotnasya` — имената, отбелязани на обекта като „не се отнася“.
 
-    Състояния: налице · не е доказано · за преценка · не се отнася · не се изисква.
+    Всеки ред носи `osi` — приложимост · наличие · приемане (вж. по-горе) — и
+    изведеното от тях старо `sastoyanie`: налице · не е доказано · за преценка ·
+    не се отнася · не се изисква.
     """
     ok, prichina = zaklyucheno()
     if not ok:
@@ -268,31 +314,40 @@ def spisak(priznaci, nalichni=None, faza=None, neotnasya=None, sobstveni=None):
         precenka = PRECENKA in chasti
         ostanali = " и ".join(x for x in chasti if x != PRECENKA) or "винаги"
         if not prilozhim(ostanali, priznaci):
-            izhod.append({**red, "sastoyanie": "не се изисква", "precenka": precenka})
+            izhod.append(_red(red, osi("не е приложимо", "не е проверено", "условие"),
+                              precenka=precenka))
             continue
         ime = red["dokument"].strip().lower()
         vpisan = imena.get(ime)
         if ime in neot and not vpisan:
-            izhod.append({**red, "sastoyanie": "не се отнася", "precenka": precenka})
+            izhod.append(_red(red, osi("не е приложимо", "не е проверено", "оператор"),
+                              precenka=precenka))
             continue
         # Име без номер не е доказателство, щом „Доказва се с“ иска нещо.
         nomer = str((vpisan or {}).get("nomer", "")).strip()
         if vpisan and red["dokazva_se"] and not nomer:
-            izhod.append({**red, "sastoyanie": "не е доказано", "vpisan": vpisan,
-                          "lipsva_nomer": True, "precenka": precenka})
+            izhod.append(_red(red, osi("изисква се", "частично намерено"),
+                              vpisan=vpisan, lipsva_nomer=True, precenka=precenka))
             continue
         if vpisan:
-            izhod.append({**red, "sastoyanie": "налице", "vpisan": vpisan, "precenka": precenka})
+            izhod.append(_red(red, osi("изисква се", "намерено"),
+                              vpisan=vpisan, precenka=precenka))
             continue
-        izhod.append({**red, "precenka": precenka,
-                      "sastoyanie": "за преценка" if precenka else "не е доказано"})
+        # „За преценка“ е УСЛОВНО ПРИЛОЖИМО: правилото още не знае дали ще се
+        # задейства. Не е нито „трябва“, нито „не трябва“. (АТ, 30.10.2026)
+        izhod.append(_red(red, osi("условно приложимо" if precenka else "изисква се",
+                                   "не е проверено" if precenka else "липсва"),
+                          precenka=precenka))
     # Групите „едно от“: доказан ли е един ред, останалите не се изискват.
     dokazani = {r.get("grupa") for r in izhod
                 if r.get("grupa") and r["sastoyanie"] == "налице"}
     if dokazani:
         for r in izhod:
             if r.get("grupa") in dokazani and r["sastoyanie"] != "налице":
-                r["sastoyanie"] = "не се изисква"
+                # По осите това НЕ е „неприложимо“: редът се изисква и е
+                # намерен — само че чрез друг ред от групата.
+                r["osi"] = osi("изисква се", "намерено", "група")
+                r["sastoyanie"] = sastoyanie_ot_osite(r["osi"])
                 r["dokazan_ot_grupata"] = True
 
     # ДВЕ ЧИСЛА, НЕ ЕДНО. „Мога ли да започна“ и „мога ли да подпиша“ са
