@@ -35,6 +35,9 @@ d2 = {"obekti": [], "prehvarliania": [{"vid": "обезщетение", "dyal": 
 bez_nomera_na_obekti(d2)
 t("при обезщетение процентът става 1/1", d2["prehvarliania"][0]["dyal"] == "1/1", d2)
 t("дробта при обезщетение остава", d2["prehvarliania"][1]["dyal"] == "1/2", d2)
+d3 = {"obekti": [], "prehvarliania": [{"vid": "обезщетение", "dyal": "23,72/151,40", "obekt": "паркомясто А6"}]}
+bez_nomera_na_obekti(d3)
+t("„23,72/151,40“ при обезщетение става 1/1", d3["prehvarliania"][0]["dyal"] == "1/1", d3)
 t("лицата носят квота в земята", "kvota_zemya" in SHEMA["properties"]["lica"]["items"]["properties"])
 t("указанието казва квотите да не са при суперфициара", "НЕ ги слагай" in UKAZANIE)
 

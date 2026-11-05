@@ -287,7 +287,9 @@ def bez_nomera_na_obekti(dok):
             p["obekt"] = zamesti[ob]
         # При обезщетение процентът е идеалната част на обекта от сградата, не
         # дял от обекта. (АРКОН, 05.11.2026)
-        if "обезщет" in (p.get("vid") or "") and "%" in (p.get("dyal") or ""):
+        # Също и „23,72/151,40“ — делът на паркомястото от гаража. (Люлин)
+        if "обезщет" in (p.get("vid") or "") and (
+                "%" in (p.get("dyal") or "") or _dyal(p.get("dyal") or "") is None):
             p["dyal"] = "1/1"
     return dok
 
