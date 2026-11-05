@@ -322,6 +322,19 @@ def bez_nomera_na_obekti(dok):
     return dok
 
 
+def bez_prazno_vpisvane(dok):
+    u"""Ръкописното вписване не се чете — четецът връща образеца с точки.
+
+    „Вх. рег. № от 10.11.2025г., Акт № ... том ... дело № .../25г.“ изглеждаше
+    попълнено и влизаше в Акт 15. Празното поле личи, че се пише на ръка.
+    (Операторът, 05.11.2026: „На ръка ще бъде!“)
+    """
+    s = dok.get("sluzhba") or ""
+    if re.search(r"\.{3}|…|№\s*(?:от|,|$)", s):
+        dok["sluzhba"] = ""
+    return dok
+
+
 def belezhki(dok):
     """Какво в прочетеното не връзва. Списък от изречения за оператора."""
     out = []
@@ -385,6 +398,7 @@ def procheti(chetci, ime, media_type, data_b64, stranici=None):
                 continue
             mahnati = pochisti_egn(d)
             bez_nomera_na_obekti(d)
+            bez_prazno_vpisvane(d)
             d.update({
                 "fajl": ime, "chetec": chetec.ime, "model": i.get("model"),
                 "sken": prep.get("sken", False),
