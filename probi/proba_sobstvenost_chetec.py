@@ -22,6 +22,11 @@ t("и правото за АП603 също", d["obekti"][2]["identifikator"] == 
 t("прехвърлянето за апартамента сочи описанието", d["prehvarliania"][0]["obekt"] == "апартамент № 15", d["prehvarliania"][0])
 t("учредяването сочи пак ЗЕМЯТА", d["prehvarliania"][1]["obekt"] == "68134.702.9889", d["prehvarliania"][1])
 t("има вид „обезщетение“", "обезщетение" in SABITIA)
+d2 = {"obekti": [], "prehvarliania": [{"vid": "обезщетение", "dyal": "6,302 %", "obekt": "апартамент № 9"},
+                                      {"vid": "обезщетение", "dyal": "1/2", "obekt": "гараж № 1"}]}
+bez_nomera_na_obekti(d2)
+t("при обезщетение процентът става 1/1", d2["prehvarliania"][0]["dyal"] == "1/1", d2)
+t("дробта при обезщетение остава", d2["prehvarliania"][1]["dyal"] == "1/2", d2)
 t("лицата носят квота в земята", "kvota_zemya" in SHEMA["properties"]["lica"]["items"]["properties"])
 t("указанието казва квотите да не са при суперфициара", "НЕ ги слагай" in UKAZANIE)
 
