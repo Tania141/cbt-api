@@ -1578,8 +1578,11 @@ def sobstvenost_chete():
         if not nalichni:
             return jsonify({"greshka": f"четецът „{izbor}“ не е настроен на сървъра"})
     try:
-        dok, info = sobstvenost.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
-                                         f.get("data", ""), stranici=body.get("stranici"))
+        # „vid“: „palnomoshtno“ — същият път, друг четец. (06.11.2026)
+        chete = (sobstvenost.procheti_palnomoshtno if body.get("vid") == "palnomoshtno"
+                 else sobstvenost.procheti)
+        dok, info = chete(nalichni, f.get("ime", ""), f.get("media_type", ""),
+                          f.get("data", ""), stranici=body.get("stranici"))
     except sobstvenost.NeSeChete as e:
         return jsonify({"greshka": str(e)})
     except sobstvenost.NikoyNeMozhe as e:
@@ -1594,6 +1597,7 @@ def sobstvenost_chete():
                tokens_out=info.get("tokens_out"),
                detail={"pi": body.get("pi"), "fajl": f.get("ime"),
                        "chetec": info.get("chetec"),
+                       "vid": body.get("vid") or "sobstvenost",
                        "prehvarliania": len(dok.get("prehvarliania") or [])})
     return jsonify({"dokument": dok})
 

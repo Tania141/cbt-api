@@ -411,3 +411,74 @@ def procheti(chetci, ime, media_type, data_b64, stranici=None):
         except NeMozheSega as e:
             prichini.append((chetec.ime, str(e)[:300]))
     raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])
+
+
+# ── ПЪЛНОМОЩНОТО ─────────────────────────────────────────────────────────────
+# Операторът, 06.11.2026: „четецът чете пълномощно — извлича за всяко лице
+# пълномощника, номера на пълномощното, датата, нотариуса; операторът го
+# сравнява и се записва под НА във възложители и в Приложение. Не в 1.1.“
+#
+# Номерът на заверката се ПРЕПИСВА на ръка в ПВА, както номерът на НА:
+# сбъркана цифра сочи чуждо пълномощно и не личи никъде.
+
+UKAZANIE_PAL = """Прочети това пълномощно.
+
+Търсиш КОЙ КОГО упълномощава и С КАКВО е заверено.
+
+Правила:
+1. „upalnomoshtiteli“ — лицата, които ДАВАТ пълномощието (упълномощителите),
+   всяко на отделен ред, с трите имена ДОСЛОВНО. Фирма — с наименованието.
+2. „palnomoshtnik“ — лицето, което ПОЛУЧАВА пълномощието, с трите имена.
+3. Заверката: „reg_nomer“ — регистровият номер на нотариалната заверка
+   („рег. № 4676“), „data“ — датата на заверката (дд.мм.гггг), „notarius“ —
+   името на нотариуса, „notarius_nomer“ — номерът му в Нотариалната камара.
+   Ако заверката е на подписа и съдържанието с два номера — пиши номера на
+   заверката на ПОДПИСА.
+4. „obhvat“ — с едно кратко изречение за какво е пълномощното (напр. „да
+   подписва актове и протоколи по време на строителството“).
+5. „do“ — до кога важи, ако е казано.
+6. НЕ ИЗВЛИЧАЙ ЕГН, лични карти и адреси.
+7. Ако нещо не пише — остави го празно. Не предполагай.
+"""
+
+SHEMA_PAL = {
+    "type": "object",
+    "properties": {
+        "upalnomoshtiteli": {"type": "array", "items": {"type": "object", "properties": {
+            "ime": _s("трите имена или наименованието на упълномощителя, дословно"),
+        }}},
+        "palnomoshtnik": _s("трите имена на пълномощника, дословно"),
+        "reg_nomer": _s("регистров номер на нотариалната заверка"),
+        "data": _s("дата на заверката, дд.мм.гггг"),
+        "notarius": _s("име на нотариуса"),
+        "notarius_nomer": _s("номер на нотариуса в Нотариалната камара"),
+        "obhvat": _s("за какво е пълномощното — едно кратко изречение"),
+        "do": _s("до кога важи, дд.мм.гггг, ако е казано"),
+        "citat": _s("дословният откъс със заверката"),
+    },
+}
+
+
+def procheti_palnomoshtno(chetci, ime, media_type, data_b64, stranici=None):
+    """Едно пълномощно → (прочетеното, info)."""
+    from .chetci import NeMozheSega
+    prep = podgotvi(ime, media_type, data_b64, stranici)
+    tekst = UKAZANIE_PAL + f"\n\nФайл: {ime}"
+    raw = prep.get("raw") or b""
+    prichini = []
+    for chetec in list(chetci):
+        try:
+            dok, i = chetec.chete(prep, SHEMA_PAL, tekst, ime=ime, raw=raw, edin_dokument=True)
+            d = dok[0] if isinstance(dok, list) else dok
+            if not d or not (d.get("palnomoshtnik") or d.get("upalnomoshtiteli")):
+                prichini.append((chetec.ime, "празен отговор"))
+                continue
+            d["upalnomoshtiteli"] = [u for u in (d.get("upalnomoshtiteli") or [])
+                                     if (u or {}).get("ime")]
+            d["palnomoshtnik"] = bez_predstavitelstvo(d.get("palnomoshtnik"))
+            d.update({"fajl": ime, "chetec": chetec.ime, "model": i.get("model")})
+            return d, {"chetec": chetec.ime,
+                       **{k: i.get(k) for k in ("model", "tokens_in", "tokens_out")}}
+        except NeMozheSega as e:
+            prichini.append((chetec.ime, str(e)[:300]))
+    raise NikoyNeMozhe(prichini or [("", "няма настроен четец")])

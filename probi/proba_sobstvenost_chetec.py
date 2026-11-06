@@ -62,6 +62,14 @@ t("и прехвърлянето сочи изчистеното описани�
 t("лицата носят квота в земята", "kvota_zemya" in SHEMA["properties"]["lica"]["items"]["properties"])
 t("указанието казва квотите да не са при суперфициара", "НЕ ги слагай" in UKAZANIE)
 
+# Пълномощното (06.11.2026)
+from rules.sobstvenost import SHEMA_PAL, UKAZANIE_PAL, procheti_palnomoshtno
+pp = SHEMA_PAL["properties"]
+t("пълномощното вади упълномощители, пълномощник, рег. №, дата, нотариус",
+  all(k in pp for k in ("upalnomoshtiteli", "palnomoshtnik", "reg_nomer", "data", "notarius", "notarius_nomer")))
+t("пълномощното не вади ЕГН", "НЕ ИЗВЛИЧАЙ ЕГН" in UKAZANIE_PAL)
+t("четецът на пълномощно е функция", callable(procheti_palnomoshtno))
+
 out = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 for x in dobri: out.write("  ok  " + x + "\n")
 for x in loshi: out.write("  ЛО  " + x + "\n")
