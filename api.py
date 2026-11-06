@@ -1558,6 +1558,20 @@ def sloy2_chete():
     return jsonify({"dokumenti": dokumenti, "dokument": dok})
 
 
+@app.route("/api/ploshtoobrazuvane", methods=["POST"])
+@require_auth
+def ploshtoobrazuvane_chete():
+    """Площообразуването → обектите в сградата и видът им. Без АИ.
+    (Операторът, 06.11.2026: „само вида на обектите в сградата“.)"""
+    from rules import ploshtoobrazuvane
+    body = request.get_json() or {}
+    f = body.get("fajl") or {}
+    try:
+        return jsonify({"tablica": ploshtoobrazuvane.procheti(f.get("ime", ""), f.get("data", ""))})
+    except ploshtoobrazuvane.NeSeChete as e:
+        return jsonify({"greshka": str(e)})
+
+
 @app.route("/api/sobstvenost/chete", methods=["POST"])
 @require_auth
 def sobstvenost_chete():
