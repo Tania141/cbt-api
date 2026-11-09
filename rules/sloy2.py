@@ -920,8 +920,12 @@ def procheti(chetci, ime, media_type, data_b64, agenda="od", stranici=None, edin
     return izhod, {**info, "chetec": chetec.ime}
 
 
-def razdeli(chetci, ime, media_type, data_b64, stranici=None):
+def razdeli(chetci, ime, media_type, data_b64, stranici=None, po_stranici=0):
     """Само разделяне: кои документи има във файла и на кои страници.
+
+    `po_stranici` > 0 — операторът казва „всеки документ е N страници“ и файлът
+    се реже на равни части БЕЗ АИ. Радулов, 09.11.2026: 8 акта обр. 7 по една
+    страница, а четецът упорито виждаше един документ.
 
     Връща ([{"stranici", "ot", "do", "vid"}], {chetec, model, tokens_in, tokens_out});
     страниците са ИСТИНСКИТЕ номера във файла, готови за /api/sloy2/chete с edin.
@@ -933,9 +937,13 @@ def razdeli(chetci, ime, media_type, data_b64, stranici=None):
     raw = prep.get("raw") or base64.b64decode(data_b64)
     n = prep.get("n") or 1
     orig = prep.get("orig") or list(range(1, n + 1))
-    info = {"tokens_in": 0, "tokens_out": 0, "chetec": None}
+    info = {"tokens_in": 0, "tokens_out": 0, "chetec": None, "n": n}
     if raw[:4] != b"%PDF" or n <= 1:
         return [_chast(orig, "")], info
+    po = int(po_stranici or 0)
+    if po > 0:
+        info["chetec"] = f"по {po} стр. — казано от оператора"
+        return [_chast(orig[a:a + po], "") for a in range(0, n, po)], info
 
     ostavashti, prichini = list(chetci), []
     import pymupdf

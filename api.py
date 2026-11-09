@@ -1669,7 +1669,7 @@ def sloy2_razdeli():
             return jsonify({"greshka": f"четецът „{izbor}“ не е настроен на сървъра — няма ключ за него"})
     try:
         chasti, info = sloy2.razdeli(nalichni, f.get("ime", ""), f.get("media_type", ""), f.get("data", ""),
-                                     stranici=body.get("stranici"))
+                                     stranici=body.get("stranici"), po_stranici=body.get("po_stranici") or 0)
     except sloy2.NeSeChete as e:
         return jsonify({"greshka": str(e)})
     except sloy2.NikoyNeMozhe as e:
@@ -1683,7 +1683,9 @@ def sloy2_razdeli():
                    tokens_in=info.get("tokens_in"), tokens_out=info.get("tokens_out"),
                    detail={"pi": body.get("pi"), "fajl": f.get("ime"), "chasti": len(chasti),
                            "chetec": info.get("chetec"), "zashto_rezerven": info.get("zashto_rezerven")})
-    return jsonify({"chasti": chasti, "chetec": info.get("chetec")})
+    # „n“ — колко страници има файлът: ако излезе един документ от осем
+    # страници, ПВА-то го казва и предлага разделяне по страници.
+    return jsonify({"chasti": chasti, "chetec": info.get("chetec"), "n": info.get("n")})
 
 
 @app.route("/api/sloy2/sravni", methods=["POST"])
