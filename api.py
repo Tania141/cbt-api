@@ -1558,6 +1558,38 @@ def sloy2_chete():
     return jsonify({"dokumenti": dokumenti, "dokument": dok})
 
 
+@app.route("/api/p2/niva/chete", methods=["POST"])
+@require_auth
+def p2_niva_chete():
+    """Сканираните проверки на нивата (Протокол 2, раздел III) → ниво · кота ·
+    дата · разрешено. Датите са на ръка — сверяват се. (Операторът, 09.11.2026)"""
+    from rules import niva_p2, chetci
+    from rules.sloy2 import NeSeChete, NikoyNeMozhe
+    nalichni = chetci.nalichni()
+    if not nalichni:
+        return jsonify({"error": "Няма настроен четец"}), 503
+    body = request.get_json() or {}
+    f = body.get("fajl") or {}
+    izbor = (body.get("chetec") or "auto").lower()
+    if izbor != "auto":
+        nalichni = [c for c in nalichni if c.kod == izbor] or nalichni
+    try:
+        dok, info = niva_p2.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
+                                     f.get("data", ""), stranici=body.get("stranici"))
+    except NeSeChete as e:
+        return jsonify({"greshka": str(e)})
+    except NikoyNeMozhe as e:
+        return jsonify({"greshka": f"Нито един четец не прочете проверки — {e}"})
+    except Exception as e:
+        print(f"p2_niva_chete: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"greshka": f"{type(e).__name__}: {e}"})
+    log_action("p2_niva_chete", user_id=request.current_user.get("sub"),
+               tenant_id=request.current_user.get("tenant_id"),
+               model=info.get("model"), tokens_in=info.get("tokens_in"),
+               tokens_out=info.get("tokens_out"), detail={"fajl": f.get("ime")})
+    return jsonify({"niva": dok})
+
+
 @app.route("/api/ploshtoobrazuvane", methods=["POST"])
 @require_auth
 def ploshtoobrazuvane_chete():

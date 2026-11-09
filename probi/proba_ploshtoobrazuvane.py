@@ -33,6 +33,13 @@ try:
 except NeSeChete as e:
     t("стар .xls се отказва с обяснение", ".xlsx" in str(e), str(e))
 
+# Нивата на Протокол 2 (09.11.2026) — схемата
+from rules.niva_p2 import SHEMA as SH_NIVA, NIVA, UKAZANIE as UK_NIVA
+pr = SH_NIVA["properties"]["proverki"]["items"]["properties"]
+t("нивата: ниво · кота · дата · разрешено", all(k in pr for k in ("nivo", "kota", "data", "razreshava")))
+t("четирите нива", NIVA == ["изкоп", "цокъл", "корниз", "било"])
+t("датите са на ръка — казано на четеца", "НА РЪКА" in UK_NIVA)
+
 out = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 for x in dobri: out.write("  ok  " + x + "\n")
 for x in loshi: out.write("  ЛО  " + x + "\n")
