@@ -303,6 +303,53 @@ def vstavi_sobstvenici(doc, redove, marker="{{ОДАИ_Собственици}}"
                           redove, (2800, 3300, 3765))
 
 
+# ── Актовете обр. 7 — таблица в Акт 15 и в ОД ───────────────────────────────
+# Операторът, 10.11.2026: при 50–60 акта таблица е по-прегледна от изречения;
+# таблицата става на редове в Word с един жест, обратното — не. Редовете идват
+# от ПВА-то (полето „Акт7_Таблица“, JSON): сверените сканирани актове и
+# подписаните от бетоновия дневник, по дати.
+AKT7_MARKER = "§АКТ7_ТАБЛИЦА§"
+AKT7_ZAGLAVIE = "Актове обр. 7 за приемане на извършените СМР по нива и елементи на строителната конструкция:"
+KOLONI_AKT7 = ("№", "Дата", "Изпълнени СМР", "от ниво", "до ниво")
+
+
+def akt7_redove(d):
+    import json
+    try:
+        r = json.loads(str((d or {}).get("Акт7_Таблица") or "[]"))
+    except ValueError:
+        return []
+    return [x for x in r if isinstance(x, dict)] if isinstance(r, list) else []
+
+
+def vstavi_akt7(doc, redove, marker=AKT7_MARKER):
+    return vstavi_tablica(doc, marker, KOLONI_AKT7, ("n", "data", "smr", "ot", "do"),
+                          redove, (600, 1300, 5165, 1400, 1400))
+
+
+def akt7_sled(doc, nachalo, redove):
+    """Заглавие и таблица веднага след абзаца, който започва с `nachalo`."""
+    import copy
+    par = next((p for p in doc.paragraphs if p.text.strip().startswith(nachalo)), None)
+    if par is None or not redove:
+        return False
+    zagl = copy.deepcopy(par._p)
+    mark = copy.deepcopy(par._p)
+    par._p.addnext(zagl)
+    zagl.addnext(mark)
+    from docx.text.paragraph import Paragraph
+    for el, tekst in ((zagl, AKT7_ZAGLAVIE), (mark, AKT7_MARKER)):
+        p = Paragraph(el, par._parent)
+        for r in p.runs[1:]:
+            r._r.getparent().remove(r._r)
+        if p.runs:
+            p.runs[0].text = tekst
+            p.runs[0].bold = False
+        else:
+            p.add_run(tekst)
+    return vstavi_akt7(doc, redove)
+
+
 def vstavi_tablica(doc, marker, koloni, klyuchove, redove, shirini):
     """Таблица на мястото на маркера. Без редове — маркерът остава (излиза с точки)."""
     if not redove:

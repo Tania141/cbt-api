@@ -1236,6 +1236,18 @@ def generate_document(doc_type):
 
     try:
         doc_bytes = generate_from_template(TEMPLATE_FILES[doc_type], repl)
+        # Актовете обр. 7 — таблица: в 1.3 на Акт 15 на мястото на маркера; в
+        # ОД под „Актове и протоколи по време на строителството“. (10.11.2026)
+        if doc_type in ("akt15", "doklad"):
+            from rules import doklad_sloy2
+            a7 = doklad_sloy2.akt7_redove(d)
+            if a7:
+                dd_ = Document(io.BytesIO(doc_bytes))
+                if doc_type == "akt15":
+                    doklad_sloy2.vstavi_akt7(dd_, a7)
+                else:
+                    doklad_sloy2.akt7_sled(dd_, "Актове и протоколи по време на строителството", a7)
+                b_ = io.BytesIO(); dd_.save(b_); doc_bytes = b_.getvalue()
 
         # Optional Dropbox upload — only if credentials are configured
         file_url = None
@@ -1303,10 +1315,19 @@ def generate_od_ai():
         repl = build_placeholders(d)
         repl["{{ОДАИ_ДО}}"] = repl.get("{{Възложител_Блок}}") or repl["{{ОДАИ_ДО}}"]
         repl.update(doklad_sloy2.blokove_od_ai(rez, d))
+        # Актовете обр. 7 — таблица вместо реда „от … до … — N бр.“ (10.11.2026).
+        a7 = doklad_sloy2.akt7_redove(d)
+        if a7:
+            stari = [r for r in str(repl.get("{{ОДАИ_Актове}}") or "").split("\n")
+                     if r.startswith("- ") and not r.startswith("- Актове обр. 7")]
+            repl["{{ОДАИ_Актове}}"] = "\n".join(stari + ["- " + doklad_sloy2.AKT7_ZAGLAVIE,
+                                                         doklad_sloy2.AKT7_MARKER])
         # Таблицата — преди заместването, за да не бъде маркерът сменен с точки.
         doklad_sloy2.vstavi_deklaracii(doc, rez["deklaracii"])
         doklad_sloy2.vstavi_sobstvenici(doc, rez["sobstvenici"])
         fill_template(doc, repl)
+        if a7:
+            doklad_sloy2.vstavi_akt7(doc, a7)
         # Техническото описание — едно за обекта, не копие от Акт 15.
         tehn = doklad_sloy2.vmukni_tehnichesko(doc, str(body.get("tehnichesko") or ""))
         if not tehn:
