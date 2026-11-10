@@ -58,16 +58,36 @@ SHEMA = {
     "required": ["redove"],
 }
 
-_KOTA = re.compile(r"(±|\+|-|–)\s*(\d+)\s*[.,]\s*(\d+)")
+# Кота: по желание знак, после число със запетая или точка. Без знак — както
+# е написана („до 8,39“). „К-312“ без запетая НЕ е кота: не се гадае дали е
+# -3,12 или -31,2 — полето остава празно и личи. (Радулов, 10.11.2026)
+_KOTA = re.compile(r"([±+\-–−])?\s*(\d+)\s*[.,]\s*(\d+)")
+
+
+def _kota(t):
+    m = _KOTA.findall(str(t or ""))
+    if not m:
+        return ""
+    z, c, d = m[-1]
+    z = "-" if z in "–−" and z else z
+    return f"{z}{int(c)},{d}"
 
 
 def koti(element):
-    """„Вертикали от к-3,12 до ±0,00“ → ['-3,12', '±0,00']."""
-    izhod = []
-    for z, c, d in _KOTA.findall(str(element or "")):
-        z = "-" if z == "–" else z
-        izhod.append(f"{z}{int(c)},{d}")
-    return izhod
+    """→ (от, до). „Вертикали от к-3,12 до ±0,00“ → ('-3,12', '±0,00').
+
+    „от … до …“ се чете ПО МЯСТО: нечетимата страна остава празна, вместо да
+    вземе котата на другата. (Радулов: „от К-312 до ±0,00“ излизаше
+    „от ±0,00 до ±0,00“.) Една кота без „от/до“ — плоча — е и двете."""
+    e = str(element or "")
+    m = re.search(r"\bот\b(.*?)\bдо\b(.*)", e, re.I)
+    if m:
+        return _kota(m.group(1)), _kota(m.group(2))
+    m = re.search(r"(.*?)\bдо\b(.*)", e, re.I)
+    if m:
+        return _kota(m.group(1)), _kota(m.group(2))
+    k = _kota(e)
+    return k, k
 
 
 def _data(s):
@@ -120,7 +140,7 @@ def predlozhenie(redove, zapochnat=""):
                     beton = None
             if not beton:
                 belezhka.append("датата на бетона не се чете — впиши я")
-        k = koti(element)
+        ot, do = koti(element)
         akt = beton - timedelta(days=1) if beton else None
         izhod.append({
             "element": element,
@@ -130,8 +150,8 @@ def predlozhenie(redove, zapochnat=""):
             "belezhka": "; ".join(belezhka),
             # Предложеното — операторът го поправя, слива или маха.
             "data": _f(akt),
-            "ot": k[0] if k else "",
-            "do": (k[1] if len(k) > 1 else k[0]) if k else "",
+            "ot": ot,
+            "do": do,
             "smr": "Кофраж и армировка на " + element[:1].lower() + element[1:],
             "razreshava": RAZRESHAVA,
         })

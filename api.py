@@ -483,13 +483,18 @@ def akt7_seriya(d, seriya):
         dd["Акт7_До_Ниво"] = str(a.get("do") or "").strip()
         dd["Акт7_СМР"] = str(a.get("smr") or "").strip()
         dd["Акт7_Разрешава"] = str(a.get("razreshava") or "").strip()
-        gotovi.append(generate_from_template(TEMPLATE_FILES["akt7"], build_placeholders(dd)))
-    osnova = Document(io.BytesIO(gotovi[0]))
+        doc = Document(io.BytesIO(generate_from_template(TEMPLATE_FILES["akt7"], build_placeholders(dd))))
+        if dd["Акт7_СМР"]:
+            _bez_poyasnenie(doc, "(изброяват се")
+        if dd["Акт7_Разрешава"]:
+            _bez_poyasnenie(doc, "(описание на последващите")
+        gotovi.append(doc)
+    osnova = gotovi[0]
     telo = osnova.element.body
     sektsiya = telo[-1] if telo[-1].tag.endswith("sectPr") else None
     for b in gotovi[1:]:
         osnova.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-        for el in list(Document(io.BytesIO(b)).element.body):
+        for el in list(b.element.body):
             if el.tag.endswith("sectPr"):
                 continue
             if sektsiya is not None:
@@ -497,6 +502,29 @@ def akt7_seriya(d, seriya):
             else:
                 telo.append(el)
     buf = io.BytesIO(); osnova.save(buf); return buf.getvalue()
+
+
+def _bez_poyasnenie(doc, nachalo):
+    """Пояснението в скоби след попълнено поле отпада — то е за празния
+    образец. (Операторът, 10.11.2026: „или да отпадат, когато имаме описание“.)
+    Маха се от първия run, който започва с „(“, до края на абзаца, заедно с
+    празните runs пред него."""
+    for p in doc.paragraphs:
+        if nachalo not in p.text:
+            continue
+        # След попълването runs може да са слети — режи по знака, не по run.
+        runs = p.runs
+        i = next((k for k, r in enumerate(runs) if "(" in r.text), None)
+        if i is None:
+            continue
+        runs[i].text = runs[i].text[:runs[i].text.index("(")].rstrip()
+        for r in runs[i + 1:]:
+            r.text = ""
+        k = i
+        while k >= 0 and not runs[k].text.strip():
+            k -= 1
+        if k >= 0:
+            runs[k].text = runs[k].text.rstrip()
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
 def make_token(user):
