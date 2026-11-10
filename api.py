@@ -468,6 +468,36 @@ def generate_from_template(template_name, replacements):
     mahni_markeri(doc)
     buf = io.BytesIO(); doc.save(buf); return buf.getvalue()
 
+def akt7_seriya(d, seriya):
+    """Паспортът + списък актове → един .docx, всеки акт на нова страница.
+
+    Всеки акт се попълва поотделно от същия шаблон; после телата се слепват
+    в първия. Шаблонът няма картини в тялото, затова слепването е безопасно.
+    """
+    from docx.enum.text import WD_BREAK
+    gotovi = []
+    for a in seriya:
+        dd = dict(d)
+        dd["Акт7_Дата"] = str(a.get("data") or "").strip()
+        dd["Акт7_От_Ниво"] = str(a.get("ot") or "").strip()
+        dd["Акт7_До_Ниво"] = str(a.get("do") or "").strip()
+        dd["Акт7_СМР"] = str(a.get("smr") or "").strip()
+        dd["Акт7_Разрешава"] = str(a.get("razreshava") or "").strip()
+        gotovi.append(generate_from_template(TEMPLATE_FILES["akt7"], build_placeholders(dd)))
+    osnova = Document(io.BytesIO(gotovi[0]))
+    telo = osnova.element.body
+    sektsiya = telo[-1] if telo[-1].tag.endswith("sectPr") else None
+    for b in gotovi[1:]:
+        osnova.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+        for el in list(Document(io.BytesIO(b)).element.body):
+            if el.tag.endswith("sectPr"):
+                continue
+            if sektsiya is not None:
+                sektsiya.addprevious(el)
+            else:
+                telo.append(el)
+    buf = io.BytesIO(); osnova.save(buf); return buf.getvalue()
+
 # ── Auth helpers ─────────────────────────────────────────────────────────────
 def make_token(user):
     from datetime import timezone, timedelta
@@ -1162,6 +1192,20 @@ def generate_document(doc_type):
 
     download_name = f"{doc_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
 
+    # АКТОВЕ ОБР. 7 ОТ БЕТОНОВИЯ ДНЕВНИК — всички в ЕДИН файл, всеки на нова
+    # страница. (Операторът, 09.11.2026: „Един файл с всички“.)
+    seriya = body.get("akt7_seriya") if doc_type == "akt7" else None
+    if seriya:
+        try:
+            doc_bytes = akt7_seriya(d, seriya)
+        except Exception as e:
+            print(f"akt7_seriya: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+        log_action("generate_doc", user_id=request.current_user["sub"], tenant_id=tenant_id,
+                   detail={"doc_type": "akt7_seriya", "pi": pi, "broy": len(seriya)})
+        return send_file(io.BytesIO(doc_bytes), as_attachment=True, download_name=download_name,
+                         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
     try:
         doc_bytes = generate_from_template(TEMPLATE_FILES[doc_type], repl)
 
@@ -1588,6 +1632,39 @@ def p2_niva_chete():
                model=info.get("model"), tokens_in=info.get("tokens_in"),
                tokens_out=info.get("tokens_out"), detail={"fajl": f.get("ime")})
     return jsonify({"niva": dok})
+
+
+@app.route("/api/beton/dnevnik/chete", methods=["POST"])
+@require_auth
+def beton_dnevnik_chete():
+    """Бетоновият дневник → предложение за актовете обр. 7, по един на
+    бетониране. Скан — с АИ (всичко се сверява); .xlsx — с код. (10.11.2026)"""
+    from rules import beton_dnevnik, chetci
+    from rules.sloy2 import NeSeChete, NikoyNeMozhe
+    body = request.get_json() or {}
+    f = body.get("fajl") or {}
+    nalichni = chetci.nalichni()
+    izbor = (body.get("chetec") or "auto").lower()
+    if izbor != "auto":
+        nalichni = [c for c in nalichni if c.kod == izbor] or nalichni
+    if not nalichni and not f.get("ime", "").lower().endswith((".xlsx", ".xlsm")):
+        return jsonify({"error": "Няма настроен четец"}), 503
+    try:
+        dok, info = beton_dnevnik.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
+                                           f.get("data", ""), stranici=body.get("stranici"))
+    except NeSeChete as e:
+        return jsonify({"greshka": str(e)})
+    except NikoyNeMozhe as e:
+        return jsonify({"greshka": f"Нито един четец не прочете дневника — {e}"})
+    except Exception as e:
+        print(f"beton_dnevnik_chete: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"greshka": f"{type(e).__name__}: {e}"})
+    log_action("beton_dnevnik_chete", user_id=request.current_user.get("sub"),
+               tenant_id=request.current_user.get("tenant_id"),
+               model=info.get("model"), tokens_in=info.get("tokens_in"),
+               tokens_out=info.get("tokens_out"),
+               detail={"fajl": f.get("ime"), "redove": len(dok.get("redove") or [])})
+    return jsonify({"dnevnik": dok})
 
 
 @app.route("/api/ploshtoobrazuvane", methods=["POST"])

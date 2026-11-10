@@ -1,0 +1,83 @@
+# -*- coding: utf-8 -*-
+"""Бетоновият дневник → предложение за актовете обр. 7.
+
+Редовете са от истинския дневник на Радулов (20250422150111357.pdf, ръкопис),
+преписани на ръка. Пробата пази: годината идва от „Започнат на“ и расте при
+нова година; датата на акта е ДЕН ПРЕДИ бетона; котите стават „от ниво / до
+ниво“; xlsx се чете с код.
+"""
+import io
+import os
+import sys
+from datetime import datetime
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.stdout.reconfigure(encoding="utf-8")
+
+from rules import beton_dnevnik as bd
+
+dobri, loshi = [], []
+
+
+def t(ime, verno, kak=None):
+    (dobri if verno else loshi).append(ime + ("" if verno else "  → %r" % (kak,)))
+
+
+REDOVE = [
+    {"element": "Подложен бетон к-3,97", "mesec": 2, "den": 27},
+    {"element": "Фундаментна плоча на к-3,17", "mesec": 3, "den": 22},
+    {"element": "Вертикали от к-3,12 до ±0,00", "mesec": 4, "den": 4},
+    {"element": "Плоча на к+2,61", "mesec": 7, "den": 29},
+    {"element": "Плоча на кота +19,95", "mesec": 3, "den": 6},   # вече 2025
+    {"element": "Плоча на к+22,84", "mesec": 4, "den": 3},
+    {"element": "Борд", "mesec": None, "den": None},
+]
+p = bd.predlozhenie(REDOVE, "27.02.2024")
+t("по един акт на ред", len(p) == 7, len(p))
+t("годината от „Започнат на“", p[1]["data_beton"] == "22.03.2024", p[1])
+t("актът е ден преди бетона", p[3]["data_beton"] == "29.07.2024" and p[3]["data"] == "28.07.2024", p[3])
+t("месецът падна → новата година", p[4]["data_beton"] == "06.03.2025", p[4])
+t("Радулов: плоча к+22,84 — бетон 03.04.2025", p[5]["data_beton"] == "03.04.2025", p[5])
+t("две коти → от / до", (p[2]["ot"], p[2]["do"]) == ("-3,12", "±0,00"), p[2])
+t("една кота → и двете", (p[3]["ot"], p[3]["do"]) == ("+2,61", "+2,61"), p[3])
+t("СМР — кофраж и армировка, малка буква", p[3]["smr"] == "Кофраж и армировка на плоча на к+2,61", p[3]["smr"])
+t("разрешава бетонирането", p[3]["razreshava"] == "Бетониране на гореописаните елементи.", p[3])
+t("нечетлива дата — казва се, не се измисля", p[6]["data"] == "" and "впиши" in p[6]["belezhka"], p[6])
+t("изведената година се казва", "Започнат на" in p[1]["belezhka"], p[1]["belezhka"])
+t("без „Започнат на“ — не се гадае", bd.predlozhenie([{"element": "Плоча", "mesec": 3, "den": 1}])[0]["data"] == "", "")
+
+# xlsx — два вида: пълна дата или месец + ден под общо заглавие.
+from openpyxl import Workbook
+
+
+def xlsx(redove):
+    wb = Workbook()
+    ws = wb.active
+    for r in redove:
+        ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+r = bd.procheti_xlsx(xlsx([
+    ["Дневник на бетоновите работи"],
+    ["Конструкция (елемент)", "Обем на бетона, м3", "Дата на бетонирането"],
+    ["Плоча на к+2,61", 45, datetime(2024, 7, 29)],
+    ["Вертикали от к+2,61 до +5,50", "12,5", "04.08.2024"],
+    [None, None, None],
+]))
+t("xlsx с пълна дата", [x.get("data_beton") for x in r] == ["29.07.2024", "04.08.2024"], r)
+r = bd.procheti_xlsx(xlsx([
+    ["Конструкция (елемент)", "Обем", "Отлежаване", "Дата на бетонирането"],
+    ["1", "2", "3", "Месец", "Дата"],
+    ["Плоча на к+2,61", 45, "", 7, 29],
+]))
+t("xlsx с месец и ден", r and r[0].get("mesec") == 7 and r[0].get("den") == 29, r)
+
+for x in dobri:
+    print("  ok  " + x)
+for x in loshi:
+    print("  ЛО  " + x)
+print(f"\n{len(loshi)} проблема" if loshi else f"\n{len(dobri)} проверки — дневникът дава актовете")
+sys.exit(1 if loshi else 0)
