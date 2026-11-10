@@ -913,6 +913,11 @@ def build_placeholders(d):
         "{{Kota_Cokul}}":               _normalize_cokul(d.get("Kota_Cokul", "")),
         "{{Kota_Korniz}}":              d.get("Kota_Korniz", ""),
         "{{Kota_Bilo}}":                d.get("Kota_Bilo", ""),
+        # Раздел III — датата на всяка проверка („Днес, …“). Пише се отпосле и
+        # се сверява с бетоновия дневник; празното остава на точки за ръка.
+        # (Операторът, 21.10 и 10.11.2026)
+        **{f"{{{{Niva_Data_{k}}}}}": str(d.get(f"Niva_Data_{k}", "")).strip() or "." * 38
+           for k in ("Izkop", "Cokul", "Korniz", "Bilo")},
         "{{Reper_Nomer}}":              d.get("Reper_Nomer", ""),
         "{{Reper_Kota}}":               d.get("Reper_Kota", ""),
         # Кирилични алиаси — същите стойности, различен правопис в Протокол 2

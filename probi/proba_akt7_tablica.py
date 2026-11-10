@@ -60,6 +60,15 @@ tekst = "\n".join(p.text for p in doc.paragraphs)
 t("ОД: заглавието е там", ds.AKT7_ZAGLAVIE in tekst and ds.AKT7_MARKER not in tekst, "")
 t("ОД: таблицата е там", any(tb.rows[0].cells[0].text == "№" and len(tb.rows) == 3 for tb in doc.tables), "")
 
+# Протокол 2, раздел III — „Днес, …“ на всяка проверка (10.11.2026).
+dp = {"Niva_Data_Izkop": "27.02.2024", "Niva_Data_Korniz": "03.04.2025"}
+doc = Document(io.BytesIO(api.generate_from_template(api.TEMPLATE_FILES["protokol2combined"], build_placeholders(dp))))
+dni = [p.text for p in doc.paragraphs if p.text.startswith("Днес")]
+t("П2: датата на изкопа е в проверката му", any("27.02.2024" in x for x in dni), dni)
+t("П2: и на корниза", any("03.04.2025" in x for x in dni), dni)
+t("П2: празните остават на точки", sum("......" in x for x in dni) >= 3, dni)
+t("П2: няма останал маркер", not any("{{" in x for x in dni), dni)
+
 for x in dobri:
     print("  ok  " + x)
 for x in loshi:
