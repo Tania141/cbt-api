@@ -41,37 +41,63 @@ SHEMA = {
     "properties": {"dokumenti": {"type": "array", "items": {
         "type": "object",
         "properties": {
-            "klyuch": _s("ключът на блока, както е даден"),
+            "nomer": {"type": "integer", "description": "номерът на блока — числото след „Блок“"},
             "tekst": _s("описанието на изпълненото"),
             "mahnato": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["klyuch", "tekst"],
+        "required": ["nomer", "tekst"],
     }}},
     "required": ["dokumenti"],
 }
 
 
+# БЛОКЪТ СЕ ПОЗНАВА ПО НОМЕР, не по ключ. 11.11.2026, първата проба на
+# Радулов: и Claude, и Mistral „не върнаха нито един блок“ — предполагам, че
+# са преписали дългия ключ („Архитектура · обемно-пространствено…“) с
+# промени и кодът ги е отхвърлил. Числото не се преписва грешно.
 def vhod(chast, blokove):
-    """Текстът към модела — блоковете с ключовете им."""
+    """Текстът към модела — блоковете, номерирани от 1."""
     redove = [f"Част: {chast}", ""]
-    for b in blokove:
-        redove += [f"=== Блок {b.get('klyuch')} — {b.get('podzaglavie') or ''} ===",
+    for n, b in enumerate(blokove, 1):
+        redove += [f"=== Блок {n} — {b.get('podzaglavie') or ''} ===",
                    str(b.get("tekst") or "").strip(), ""]
     return "\n".join(redove)
 
 
-def razberi(dok, klyuchove):
-    """Отговорът → {ключ: {tekst, mahnato}}; непознат ключ отпада."""
+def _zn(s):
+    import re
+    return re.sub(r"[^0-9а-яa-z]+", "", str(s or "").lower())
+
+
+def razberi(dok, blokove):
+    """Отговорът → {ключ: {tekst, mahnato}}. По номер; резерва — ключът или
+    подзаглавието, без главни букви и знаци. Непознатото отпада."""
     spisak = (dok or {}).get("dokumenti") if isinstance(dok, dict) else dok
+    if isinstance(spisak, dict):
+        spisak = [spisak]
+    po_zn = {}
+    for b in blokove:
+        for v in (b.get("klyuch"), b.get("podzaglavie")):
+            if _zn(v):
+                po_zn.setdefault(_zn(v), b)
     out = {}
     for x in spisak or []:
         if not isinstance(x, dict):
             continue
-        k = str(x.get("klyuch") or "").strip()
-        if k in klyuchove:
-            m = x.get("mahnato") or []
-            out[k] = {"tekst": str(x.get("tekst") or "").strip(),
-                      "mahnato": [str(y) for y in m] if isinstance(m, list) else [str(m)]}
+        b = None
+        try:
+            n = int(str(x.get("nomer")).strip())
+            if 1 <= n <= len(blokove):
+                b = blokove[n - 1]
+        except (TypeError, ValueError):
+            pass
+        if b is None:
+            b = po_zn.get(_zn(x.get("klyuch"))) or po_zn.get(_zn(x.get("podzaglavie")))
+        if b is None:
+            continue
+        m = x.get("mahnato") or []
+        out[str(b.get("klyuch"))] = {"tekst": str(x.get("tekst") or "").strip(),
+                                     "mahnato": [str(y) for y in m] if isinstance(m, list) else [str(m)]}
     return out
 
 
@@ -83,13 +109,17 @@ def predlozhi(chetci, chast, blokove):
             "stranici": [tekst], "sken": False}
     klyuchove = {str(b.get("klyuch")) for b in blokove}
     prichini = []
+    import json
     for chetec in list(chetci):
         try:
             dok, i = chetec.chete(prep, SHEMA, UKAZANIE, ime="izpalnenie.txt", raw=b"",
                                   edin_dokument=True)
-            out = razberi(dok, klyuchove)
+            out = razberi(dok, blokove)
             if not out:
-                prichini.append((chetec.ime, "не върна нито един блок"))
+                # Какво все пак е дошло — в лога, за да се види причината.
+                print(f"izpalnenie: {chetec.ime} — нищо разпознато; дойде: "
+                      f"{json.dumps(dok, ensure_ascii=False)[:600]}", flush=True)
+                prichini.append((chetec.ime, "не върна нито един разпознат блок"))
                 continue
             return out, {"chetec": chetec.ime, "lipsvat": sorted(klyuchove - set(out)),
                          **{k: i.get(k) for k in ("model", "tokens_in", "tokens_out")}}
