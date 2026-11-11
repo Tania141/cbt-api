@@ -19,6 +19,7 @@
 ОТДЕЛЕН ОТ `sloy2.py` НАРОЧНО: друга схема, друга цел. Четенето за ОД работи и
 не се пипа (искане на оператора). Общото е само `podgotvi` и четците.
 """
+import base64
 import json
 import re
 
@@ -580,6 +581,46 @@ def opisanie_na_chastta(z, stranici, sken):
     return z
 
 
+def docx_v_red(raw):
+    """.docx → текст В РЕДА НА ДОКУМЕНТА: абзаците и таблиците на мястото им.
+
+    Общото четене (`podgotvi`) слага всички таблици НАКРАЯ — след подписа на
+    проектанта. Описанието спира на подписа и таблицата „Градоустройствени
+    характеристики“ изпадаше (Радулов, 11.11.2026). Редът на таблица — клетките
+    с „ | “, повторените (слети) клетки — веднъж.
+    """
+    import io as _io
+    from docx import Document
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+    d = Document(_io.BytesIO(raw))
+    izhod = []
+    for el in d.element.body:
+        tag = el.tag.rsplit("}", 1)[-1]
+        if tag == "p":
+            izhod.append(Paragraph(el, d).text)
+        elif tag == "tbl":
+            for red in Table(el, d).rows:
+                kl = []
+                for c in red.cells:
+                    t = " ".join(c.text.split())
+                    if t and (not kl or kl[-1] != t):
+                        kl.append(t)
+                if kl:
+                    izhod.append(" | ".join(kl))
+    return "\n".join(izhod)
+
+
+def _tekst_v_red(ime, data_b64, stranici):
+    """Текстът за описанието: при .docx — в реда на документа; иначе — както е."""
+    if str(ime or "").lower().endswith(".docx") and data_b64:
+        try:
+            return [docx_v_red(base64.b64decode(data_b64))]
+        except Exception:
+            pass
+    return stranici
+
+
 def bez_ai(ime, media_type, data_b64, chast_kod, stranici=None):
     """Текстова записка с казана част → описанието ѝ, с код, без АИ.
 
@@ -595,7 +636,7 @@ def bez_ai(ime, media_type, data_b64, chast_kod, stranici=None):
         return None
     z = {"chast_kod": chast_kod, "chast_ime": CHASTI[chast_kod], "chast_ot": "казана от оператора",
          "priznaci": [], "materiali": [], "opisanie_blokove": []}
-    opisanie_na_chastta(z, prep["stranici"], False)
+    opisanie_na_chastta(z, _tekst_v_red(ime, data_b64, prep["stranici"]), False)
     if not z["opisanie_blokove"]:
         return None
     z.update({"fajl": ime, "chetec": "кодът — без АИ", "model": "", "sken": False, "ot_tekst": True,
@@ -633,7 +674,8 @@ def procheti(chetci, ime, media_type, data_b64, stranici=None, chast_kod=None):
                 z["chast_kod_chetec"] = z.get("chast_kod")
                 z["chast_kod"] = chast_kod
                 z["chast_ot"] = "казана от оператора"
-            opisanie_na_chastta(z, prep.get("stranici") or [], prep.get("sken", False))
+            opisanie_na_chastta(z, _tekst_v_red(ime, data_b64, prep.get("stranici") or []),
+                                prep.get("sken", False))
             z.update({
                 "fajl": ime, "chetec": chetec.ime, "model": i.get("model"),
                 "sken": prep.get("sken", False), "ot_tekst": bool(prep.get("ot_tekst")),

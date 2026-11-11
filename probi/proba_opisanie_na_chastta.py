@@ -94,6 +94,12 @@ if os.path.isfile(PAT):
     t("Радулов без АИ: описанието е там", zb and zb["opisanie_blokove"][0]["tekst"].startswith("Настоящия проект"), zb and zb.get("chetec"))
     t("Радулов без АИ: казва, че е от кода", zb and zb["chetec"] == "кодът — без АИ" and zb["chast_ot"] == "казана от оператора", zb and zb.get("chetec"))
     t("Радулов без АИ: под 5 секунди", time.monotonic() - t0 < 5, time.monotonic() - t0)
+    # Таблицата „Градоустройствени характеристики“ — на мястото си, преди подписа
+    tb = zb["opisanie_blokove"][0]["tekst"] if zb else ""
+    t("Радулов: таблицата с градоустройствените характеристики е вътре",
+      "Показатели | Допустими" in tb and "58,91%" in tb, tb[-400:])
+    t("Радулов: таблицата е след „Площ на УПИ“, без подписа", tb.find("Площ на УПИ") < tb.find("Показатели")
+      and "Проектант" not in tb, tb[-300:])
 
 t("без казана част — без АИ не се чете", zp.bez_ai("x.docx", "", base64.b64encode(b"x").decode(), "") is None, "")
 from rules import chetci as ch
