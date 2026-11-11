@@ -87,6 +87,19 @@ if os.path.isfile(PAT):
       and "Фундаментната плоча" not in tr and "паркоустройствен проект" not in tr, zr["otpadnali_chasti"])
     t("Радулов: архитектурата е цяла", "Обемно-пространствено" in tr and "Фасадната топлоизолация" in tr, len(tr))
     print(f"  (Радулов: {len(tr)} знака описание; отпаднали: {zr['otpadnali_chasti']})")
+    # Без АИ — за секунди (работникът беше убит след 10 мин. четене с АИ)
+    import time
+    t0 = time.monotonic()
+    zb = zp.bez_ai(os.path.basename(PAT), "", base64.b64encode(open(PAT, "rb").read()).decode(), "ARH")
+    t("Радулов без АИ: описанието е там", zb and zb["opisanie_blokove"][0]["tekst"].startswith("Настоящия проект"), zb and zb.get("chetec"))
+    t("Радулов без АИ: казва, че е от кода", zb and zb["chetec"] == "кодът — без АИ" and zb["chast_ot"] == "казана от оператора", zb and zb.get("chetec"))
+    t("Радулов без АИ: под 5 секунди", time.monotonic() - t0 < 5, time.monotonic() - t0)
+
+t("без казана част — без АИ не се чете", zp.bez_ai("x.docx", "", base64.b64encode(b"x").decode(), "") is None, "")
+from rules import chetci as ch
+src = open(ch.__file__, encoding="utf-8").read()
+t("Claude има твърд краен срок за целия отговор", "CLAUDE_KRAEN_SROK" in src and "time.monotonic() > kraj" in src
+  and ch.CLAUDE_KRAEN_SROK < 600, ch.CLAUDE_KRAEN_SROK)
 
 for x in dobri:
     print("  ok  " + x)

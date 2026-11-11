@@ -43,6 +43,9 @@ def _razcheti_spisak(tekst):
 # Колко чака Claude, преди да се предаде на резервния. Работникът има 600 с
 # (Procfile), така че остава време и за Mistral.
 CLAUDE_SROK = float(os.environ.get('CLAUDE_SROK', '180'))
+# Целият отговор — не повече от толкова (вж. Claude.chete). Работникът има
+# 600 с; остава време за резервния четец.
+CLAUDE_KRAEN_SROK = float(os.environ.get('CLAUDE_KRAEN_SROK', '300'))
 
 
 def _claude_ne_mozhe(e):
@@ -112,7 +115,18 @@ class Claude:
             # (Операторът, 19.10.2026: две записки на .docx.)
             klient = anthropic.Anthropic(api_key=self.api_key,
                                          timeout=CLAUDE_SROK, max_retries=1)
+            # ТВЪРД КРАЕН СРОК за целия отговор (11.11.2026, Радулов).
+            # `timeout` важи за ЧАКАНЕ между байтовете — докато Claude пише,
+            # той не изтича. Записката по Архитектура течеше над 10 минути и
+            # работникът беше убит („WORKER TIMEOUT“ → „Failed to fetch“).
+            # Сега след CLAUDE_KRAEN_SROK се спира и се минава на резервния.
+            import time
+            kraj = time.monotonic() + CLAUDE_KRAEN_SROK
             with klient.messages.stream(**zayavka) as potok:
+                for _ in potok:
+                    if time.monotonic() > kraj:
+                        raise NeMozheSega(f"Claude не свърши за {int(CLAUDE_KRAEN_SROK)} с — "
+                                          "отговорът е прекъснат, пробва се резервният четец")
                 r = potok.get_final_message()
         except anthropic.APIError as e:
             if _claude_ne_mozhe(e):

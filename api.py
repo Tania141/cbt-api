@@ -1562,9 +1562,17 @@ def zapiski_chete():
         if not nalichni:
             return jsonify({"greshka": f"четецът „{izbor}“ не е настроен на сървъра — няма ключ за него"})
     try:
-        z, info = zapiski.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
-                                   f.get("data", ""), stranici=body.get("stranici"),
-                                   chast_kod=body.get("chast_kod") or None)
+        # Текстова записка с казана част — описанието с код, без АИ (11.11.2026).
+        z = None
+        if body.get("samo_opisanie", True) and body.get("chast_kod"):
+            z = zapiski.bez_ai(f.get("ime", ""), f.get("media_type", ""), f.get("data", ""),
+                               body.get("chast_kod"), stranici=body.get("stranici"))
+        if z is not None:
+            info = {"chetec": "кодът — без АИ", "tokens_in": 0, "tokens_out": 0}
+        else:
+            z, info = zapiski.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
+                                       f.get("data", ""), stranici=body.get("stranici"),
+                                       chast_kod=body.get("chast_kod") or None)
     except zapiski.NeSeChete as e:
         return jsonify({"greshka": str(e)})
     except zapiski.NikoyNeMozhe as e:

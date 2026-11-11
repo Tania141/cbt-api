@@ -580,6 +580,29 @@ def opisanie_na_chastta(z, stranici, sken):
     return z
 
 
+def bez_ai(ime, media_type, data_b64, chast_kod, stranici=None):
+    """Текстова записка с казана част → описанието ѝ, с код, без АИ.
+
+    11.11.2026, Радулов: четенето на записката по Архитектура с АИ продължи
+    над 10 минути и работникът беше убит („Failed to fetch“). За описанието
+    АИ не трябва — то се взима от текста. Признаците и материалите (за ОСИП)
+    са отделно четене. → записка, или None, ако няма текстов слой.
+    """
+    if chast_kod not in CHASTI:
+        return None
+    prep = podgotvi(ime, media_type, data_b64, stranici)
+    if prep.get("sken") or not (prep.get("stranici") or []):
+        return None
+    z = {"chast_kod": chast_kod, "chast_ime": CHASTI[chast_kod], "chast_ot": "казана от оператора",
+         "priznaci": [], "materiali": [], "opisanie_blokove": []}
+    opisanie_na_chastta(z, prep["stranici"], False)
+    if not z["opisanie_blokove"]:
+        return None
+    z.update({"fajl": ime, "chetec": "кодът — без АИ", "model": "", "sken": False, "ot_tekst": True,
+              "belezhka": prep.get("belezhka", ""), "samo_opisanie": True})
+    return z
+
+
 def procheti(chetci, ime, media_type, data_b64, stranici=None, chast_kod=None):
     """Една записка → прочетеното от нея. Връща (записка, info).
 
