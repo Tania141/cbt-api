@@ -1683,6 +1683,40 @@ def p2_niva_chete():
     return jsonify({"niva": dok})
 
 
+@app.route("/api/tekst/izpalnenie", methods=["POST"])
+@require_auth
+def tekst_izpalnenie():
+    """Блоковете „по проект“ на една част → предложение „изпълнено“ (сегашно
+    време, без проектантските указания). Операторът поправя и потвърждава.
+    (11.11.2026)"""
+    from rules import izpalnenie, chetci
+    from rules.sloy2 import NikoyNeMozhe
+    body = request.get_json() or {}
+    blokove = [b for b in (body.get("blokove") or []) if str((b or {}).get("tekst") or "").strip()]
+    if not blokove:
+        return jsonify({"greshka": "няма текст за преработване"})
+    nalichni = chetci.nalichni()
+    izbor = (body.get("chetec") or "auto").lower()
+    if izbor != "auto":
+        nalichni = [c for c in nalichni if c.kod == izbor] or nalichni
+    if not nalichni:
+        return jsonify({"error": "Няма настроен четец"}), 503
+    try:
+        out, info = izpalnenie.predlozhi(nalichni, str(body.get("chast") or ""), blokove)
+    except NikoyNeMozhe as e:
+        return jsonify({"greshka": f"Нито един модел не преработи текста — {e}"})
+    except Exception as e:
+        print(f"tekst_izpalnenie: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"greshka": f"{type(e).__name__}: {e}"})
+    log_action("tekst_izpalnenie", user_id=request.current_user.get("sub"),
+               tenant_id=request.current_user.get("tenant_id"),
+               model=info.get("model"), tokens_in=info.get("tokens_in"),
+               tokens_out=info.get("tokens_out"),
+               detail={"chast": body.get("chast"), "blokove": len(blokove), "lipsvat": info.get("lipsvat")})
+    return jsonify({"izpalnenie": out, "chetec": info.get("chetec"), "lipsvat": info.get("lipsvat"),
+                    "tokens_in": info.get("tokens_in"), "tokens_out": info.get("tokens_out")})
+
+
 @app.route("/api/beton/dnevnik/chete", methods=["POST"])
 @require_auth
 def beton_dnevnik_chete():
