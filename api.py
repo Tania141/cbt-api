@@ -1563,7 +1563,8 @@ def zapiski_chete():
             return jsonify({"greshka": f"четецът „{izbor}“ не е настроен на сървъра — няма ключ за него"})
     try:
         z, info = zapiski.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
-                                   f.get("data", ""), stranici=body.get("stranici"))
+                                   f.get("data", ""), stranici=body.get("stranici"),
+                                   chast_kod=body.get("chast_kod") or None)
     except zapiski.NeSeChete as e:
         return jsonify({"greshka": str(e)})
     except zapiski.NikoyNeMozhe as e:
@@ -1576,7 +1577,16 @@ def zapiski_chete():
                tenant_id=request.current_user.get("tenant_id"),
                detail={"fajl": f.get("ime"), "chast": z.get("chast_kod"),
                        "ot_tekst": z.get("ot_tekst"), **{k: info.get(k) for k in ("chetec", "tokens_in", "tokens_out")}})
-    return jsonify({"zapiska": z, "info": info})
+    # Блоковете — в същия вид като в /api/zapiski/rezyume. Новото ПВА ги
+    # търсеше тук и не намираше нищо: при четене не ставаше нито един блок.
+    # (11.11.2026)
+    blokove = [{"chast": zapiski.CHASTI.get(z.get("chast_kod"), z.get("chast_kod")),
+                "chast_kod": z.get("chast_kod", ""), "fajl": z.get("fajl", ""),
+                "razdeli": [{"podzaglavie": b.get("podzaglavie") or "Описание",
+                             "tekst": b.get("tekst") or "", "rolya": b.get("rolya") or "описание",
+                             "red": b.get("red") or 1, "stranica": b.get("stranica")}
+                            for b in (z.get("opisanie_blokove") or []) if (b.get("tekst") or "").strip()]}]
+    return jsonify({"zapiska": z, "info": info, "blokove": blokove})
 
 
 @app.route("/api/zapiski/rezyume", methods=["POST"])

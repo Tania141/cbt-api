@@ -478,8 +478,114 @@ def izreji_blokove(z, stranici):
     return srezani
 
 
-def procheti(chetci, ime, media_type, data_b64, stranici=None):
-    """Една записка → прочетеното от нея. Връща (записка, info)."""
+# ── ОПИСАНИЕТО НА ЧАСТТА — ЦЯЛО, НЕ НАРЯЗАНО ────────────────────────────────
+#
+# Операторът, 11.11.2026, след първата проба на Радулов:
+# - частта на записката я казва ТЯ (при качването), не четецът;
+# - разделите НЕ се режат — описанието на частта е едно;
+# - в записката по една част често има преразказ на други („2.2. Част
+#   Конструкции“, „2.3. Част Паркоустройство“ в архитектурата). Той ОТПАДА:
+#   източникът за всяка част е нейната собствена записка.
+#
+# Четецът беше нарязал архитектурата на раздели и беше кръстил един
+# „Озеленяване“ — заглавие, измислено по съдържанието.
+
+_CHAST_PO_DUMA = [
+    (r"архитект", "ARH"), (r"конструк|строителни\s+конструк", "KONSTR"),
+    (r"електр", "EL"), (r"вик\b|водоснаб|водопровод|канализ", "VIK"),
+    (r"овк|отоплен|вентилац|климат", "OVK"), (r"енергийн", "EE"),
+    (r"пожар|пб\b|пбс", "PB"), (r"геодез", "GEO"),
+    (r"паркоустр|озелен|ландшафт", "OZELEN"), (r"пбз|безопасност\s+и\s+здраве", "PBZ"),
+]
+_OBSHTO_ZAGLAVIE = re.compile(
+    r"^\s*(?:\d+(?:\.\d+)*\.?\s*)?(градоустройствен|ситуаци|технико-икономическ|показатели|баланс\s+на\s+територията)", re.I)
+_ZAGLAVIE_CHAST = re.compile(r"^\s*(?:\d+(?:\.\d+)*\.?\s*)?част\s*[:„\"“]?\s*(.{2,40})$", re.I)
+
+
+def chast_na_zaglavie(red):
+    """„2.2. Част Конструкции“ → 'KONSTR'; не е заглавие на част → None."""
+    m = _ZAGLAVIE_CHAST.match(str(red or "").strip())
+    if not m:
+        return None
+    t = m.group(1).lower()
+    for izraz, kod in _CHAST_PO_DUMA:
+        if re.search(izraz, t):
+            return kod
+    return None
+
+
+def bez_chuzhdi_chasti(tekst, svoya):
+    """Маха преразказа на ДРУГИ части: от „Част X“ (X ≠ своята) до следващото
+    заглавие на част. → (текст, [махнатите заглавия])."""
+    izhod, mahnati, prez = [], [], False
+    for red in str(tekst or "").split("\n"):
+        kod = chast_na_zaglavie(red)
+        if kod:
+            prez = kod != svoya
+            if prez:
+                mahnati.append(red.strip())
+                continue
+        elif prez and _OBSHTO_ZAGLAVIE.match(red):
+            # „Градоустройствени характеристики“ след преразказа е на самата
+            # записка, не на чуждата част (Радулов, 11.11.2026).
+            prez = False
+        if not prez:
+            izhod.append(red)
+    return "\n".join(izhod).strip(), mahnati
+
+
+_OZ = re.compile(r"обяснителна\s+записка", re.I)
+_SHAPKA = re.compile(r"^\s*(обект|възложител|фаза|част|проектант|съгласували|гр\.|дата)\s*[:.]", re.I)
+_KRAJ = re.compile(r"^\s*(проектант|съставил|изготвил)\s*[:.]|^\s*\d{2}\.\d{4}\s*г", re.I)
+
+
+def opisanie_ot_teksta(tekst):
+    """Текстова записка (.docx, текстов PDF) → описанието, дословно: след
+    „ОБЯСНИТЕЛНА ЗАПИСКА“ и шапката ѝ (обект, възложител, фаза, част), до
+    подписа на проектанта. Без АИ."""
+    redove = [r.rstrip() for r in str(tekst or "").split("\n")]
+    nachalo = 0
+    for i, r in enumerate(redove):
+        if _OZ.search(r):
+            nachalo = i + 1
+    while nachalo < len(redove) and (not redove[nachalo].strip() or _SHAPKA.match(redove[nachalo])
+                                     or (redove[nachalo].strip().isupper() and len(redove[nachalo].strip()) < 60)):
+        nachalo += 1
+    izhod = []
+    for r in redove[nachalo:]:
+        if _KRAJ.match(r):
+            break
+        izhod.append(r)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(izhod)).strip()
+
+
+def opisanie_na_chastta(z, stranici, sken):
+    """Едно описание за записката — цяло, без чуждите части. При текстов
+    документ — от текста, с код; при скан — описателните раздели на четеца,
+    слепени по реда им."""
+    svoya = z.get("chast_kod") or ""
+    tekst = ""
+    if stranici and not sken:
+        tekst = opisanie_ot_teksta("\n".join(stranici))
+    if len(tekst) < 200:
+        razdeli = sorted([b for b in (z.get("opisanie_blokove") or [])
+                          if isinstance(b, dict) and (b.get("rolya") or "описание") == "описание"
+                          and str(b.get("tekst") or "").strip()],
+                         key=lambda b: (b.get("red") or 0, b.get("stranica") or 0))
+        tekst = "\n\n".join(str(b["tekst"]).strip() for b in razdeli)
+    tekst, mahnati = bez_chuzhdi_chasti(tekst, svoya)
+    z["opisanie_blokove"] = ([{"podzaglavie": "Описание", "tekst": tekst, "rolya": "описание", "red": 1}]
+                             if tekst else [])
+    z["otpadnali_chasti"] = mahnati
+    return z
+
+
+def procheti(chetci, ime, media_type, data_b64, stranici=None, chast_kod=None):
+    """Една записка → прочетеното от нея. Връща (записка, info).
+
+    `chast_kod` — частта, казана от оператора. Тя бие преценката на четеца;
+    неговата остава в `chast_kod_chetec`, за да личи, ако се разминават.
+    """
     from .chetci import NeMozheSega
     prep = _kam_tekst(podgotvi(ime, media_type, data_b64, stranici), ime)
     tekst = UKAZANIE + f"\n\nФайл: {ime}"
@@ -500,6 +606,11 @@ def procheti(chetci, ime, media_type, data_b64, stranici=None):
                 # част“ без съдържание и обърква броя на прочетените. (01.10.2026)
                 prichini.append((chetec.ime, "празен отговор"))
                 continue
+            if chast_kod in CHASTI:
+                z["chast_kod_chetec"] = z.get("chast_kod")
+                z["chast_kod"] = chast_kod
+                z["chast_ot"] = "казана от оператора"
+            opisanie_na_chastta(z, prep.get("stranici") or [], prep.get("sken", False))
             z.update({
                 "fajl": ime, "chetec": chetec.ime, "model": i.get("model"),
                 "sken": prep.get("sken", False), "ot_tekst": bool(prep.get("ot_tekst")),
