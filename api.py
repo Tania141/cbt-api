@@ -236,6 +236,9 @@ def init_db():
             # докъдето фирмата е стигнала на хартия.
             cur.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "
                         "zk_nachalen_nomer INTEGER")
+            # Таван на четенията с АИ — за демо фирма (17.11.2026). NULL = без таван.
+            cur.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS ai_tavan INTEGER")
+            cur.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS ai_broy INTEGER DEFAULT 0")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS login_attempts (
                     id         SERIAL PRIMARY KEY,
@@ -551,8 +554,51 @@ def require_auth(f):
         except jwt.InvalidTokenError:
             return jsonify({"error": "Невалиден токен"}), 401
         request.current_user = payload
+        # ТАВАН НА ЧЕТЕНИЯТА С АИ за фирма с таван (демо, 17.11.2026). Всяко
+        # повикване към модел се брои; при изчерпан таван — отказ с думи.
+        if request.path in AI_PATISHTA or request.path.startswith("/api/validate/"):
+            otkaz = _ai_tavan_proveri(payload.get("tenant_id"))
+            if otkaz:
+                return jsonify({"greshka": otkaz}), 403
         return f(*args, **kwargs)
     return wrapper
+
+
+# Пътищата, които викат модел (Claude/Mistral) — за тавана на демо фирма.
+AI_PATISHTA = {
+    "/api/sloy2/chete", "/api/sloy2/razdeli", "/api/zapiski/chete", "/api/sobstvenost/chete",
+    "/api/p2/niva/chete", "/api/beton/dnevnik/chete", "/api/tekst/izpalnenie",
+    "/api/ai/chat", "/api/ai/extract-protokol2", "/api/ai/generate",
+    "/api/ai/generate-akt15-sgrada", "/api/ai/kategoria-smisyl",
+}
+
+
+def _ai_tavan_proveri(tenant_id):
+    """Фирма с таван: изчерпан → текст на отказа; иначе брои и пуска (None).
+    Фирма без таван (NULL) — без ограничение, нищо не се брои."""
+    if not tenant_id:
+        return None
+    conn = get_db()
+    if not conn:
+        return None
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT ai_tavan, ai_broy FROM tenants WHERE id::text = %s", (str(tenant_id),))
+                r = cur.fetchone()
+                if not r or r["ai_tavan"] is None:
+                    return None
+                if (r["ai_broy"] or 0) >= r["ai_tavan"]:
+                    return (f"Демото позволява {r['ai_tavan']} четения с АИ — изчерпани са. "
+                            "Разглеждането и съставянето на документи продължават.")
+                cur.execute("UPDATE tenants SET ai_broy = COALESCE(ai_broy, 0) + 1 WHERE id::text = %s",
+                            (str(tenant_id),))
+        return None
+    except Exception as e:
+        print(f"_ai_tavan_proveri: {type(e).__name__}: {e}", flush=True)
+        return None
+    finally:
+        conn.close()
 
 def require_admin(f):
     @wraps(f)
@@ -956,6 +1002,46 @@ def activate_user(user_id):
         return jsonify({"status": "ok", "message": f"Потребител {target['email']} е активиран."})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route("/api/admin/demo-pokana", methods=["POST"])
+@require_admin
+def demo_pokana():
+    """Покана за демо с един бутон (17.11.2026): отделна фирма „Демо“ с таван
+    на четенията с АИ и еднократна покана. Колегата сам слага имейл и парола;
+    в отделната фирма не вижда нищо от данните на поканилия."""
+    body = request.get_json() or {}
+    tavan = int(body.get("tavan") or 20)
+    dni = int(body.get("dni") or 7)
+    ime = str(body.get("ime") or "").strip()[:80]
+    conn = get_db()
+    if not conn:
+        return jsonify({"error": "База данни не е свързана"}), 503
+    try:
+        sega = datetime.now().strftime("%d.%m.%Y %H:%M")
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO tenants (name, email, ai_tavan, ai_broy)
+                       VALUES (%s, %s, %s, 0) RETURNING id""",
+                    (f"Демо — {ime or 'колега'} — {sega}", f"demo-{secrets.token_hex(6)}@demo.local", tavan))
+                tenant_id = str(cur.fetchone()["id"])
+                code = secrets.token_urlsafe(32)
+                cur.execute(
+                    """INSERT INTO invites (code, tenant_id, role, created_by, expires_at)
+                       VALUES (%s, %s, 'operator', %s, NOW() + INTERVAL '%s days')
+                       RETURNING code, expires_at""",
+                    (code, tenant_id, request.current_user.get("sub"), dni))
+                inv = dict(cur.fetchone())
+        log_action("demo_pokana", user_id=request.current_user.get("sub"),
+                   tenant_id=tenant_id, detail={"tavan": tavan, "dni": dni, "ime": ime})
+        return jsonify({"status": "ok", "kod": inv["code"], "do": str(inv["expires_at"]),
+                        "tenant_id": tenant_id, "tavan": tavan}), 201
+    except Exception as e:
+        print(f"demo_pokana: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
     finally:
         conn.close()
 
