@@ -1327,6 +1327,12 @@ def generate_document(doc_type):
         if doc_type in ("akt15", "doklad"):
             from rules import doklad_sloy2
             a7 = doklad_sloy2.akt7_redove(d)
+            # Показателите — „по виза / по основен проект / по промяна чл. 154“ (17.11.2026)
+            pk = doklad_sloy2.pokazateli_redove(d) if doc_type == "akt15" else []
+            if pk:
+                dd_ = Document(io.BytesIO(doc_bytes))
+                doklad_sloy2.vstavi_pokazateli(dd_, pk)
+                b_ = io.BytesIO(); dd_.save(b_); doc_bytes = b_.getvalue()
             if a7:
                 dd_ = Document(io.BytesIO(doc_bytes))
                 if doc_type == "akt15":

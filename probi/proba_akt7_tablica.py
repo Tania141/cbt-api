@@ -69,6 +69,21 @@ t("П2: и на корниза", any("03.04.2025" in x for x in dni), dni)
 t("П2: празните остават на точки", sum("......" in x for x in dni) >= 3, dni)
 t("П2: няма останал маркер", not any("{{" in x for x in dni), dni)
 
+# Показателите — „по виза / по основен проект / по промяна чл. 154“ (17.11.2026)
+pk = [{"ime": "Кинт", "viza": "3,5", "osn": "3,499", "izm": "3,499", "razlika": False},
+      {"ime": "РЗП – подземно", "viza": "-", "osn": "939,87м2", "izm": "936,20 м2", "razlika": True}]
+dp = {"Строеж": "Сграда", "Показатели_Таблица": json.dumps(pk, ensure_ascii=False),
+      "По_Изпълнение": "Част Архитектура:\nтекст\nПоказатели:\n" + ds.POKAZATELI_MARKER}
+doc = Document(io.BytesIO(api.generate_from_template(api.TEMPLATE_FILES["akt15"], build_placeholders(dp))))
+t("показатели: маркерът е в „По изпълнение“", any(ds.POKAZATELI_MARKER in p.text for p in doc.paragraphs), "")
+ds.vstavi_pokazateli(doc, ds.pokazateli_redove(dp))
+tp = [tb for tb in doc.tables if tb.rows and tb.rows[0].cells[0].text == "Показател"]
+t("показатели: таблица с четирите колони", tp and [c.text for c in tp[0].rows[0].cells] == list(ds.KOLONI_POKAZATELI),
+  tp and [c.text for c in tp[0].rows[0].cells])
+t("показатели: разликата е удебелена, еднаквото — не",
+  tp and tp[0].rows[2].cells[3].paragraphs[0].runs[0].bold and not tp[0].rows[1].cells[3].paragraphs[0].runs[0].bold, "")
+t("показатели: маркерът изчезва", not any(ds.POKAZATELI_MARKER in p.text for p in doc.paragraphs), "")
+
 for x in dobri:
     print("  ok  " + x)
 for x in loshi:

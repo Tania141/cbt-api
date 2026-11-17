@@ -350,6 +350,37 @@ def akt7_sled(doc, nachalo, redove):
     return vstavi_akt7(doc, redove)
 
 
+# ── Показателите — „по виза“ · „по основен проект“ · „по промяна чл. 154“ ──
+# Операторът, 17.11.2026. Редовете идват от ПВА-то („Показатели_Таблица“);
+# различните стойности между основния проект и промяната — удебелени.
+POKAZATELI_MARKER = "§ПОКАЗАТЕЛИ§"
+KOLONI_POKAZATELI = ("Показател", "По виза", "По основен проект", "По промяна чл. 154")
+
+
+def pokazateli_redove(d):
+    import json
+    try:
+        r = json.loads(str((d or {}).get("Показатели_Таблица") or "[]"))
+    except ValueError:
+        return []
+    return [x for x in r if isinstance(x, dict)] if isinstance(r, list) else []
+
+
+def vstavi_pokazateli(doc, redove, marker=POKAZATELI_MARKER):
+    if not redove:
+        return False
+    tbl = vstavi_tablica(doc, marker, KOLONI_POKAZATELI, ("ime", "viza", "osn", "izm"),
+                         [{**r, "viza": r.get("viza") or "—", "osn": r.get("osn") or "—",
+                           "izm": r.get("izm") or "—"} for r in redove], (3365, 2000, 2250, 2250))
+    if tbl is not True and tbl:
+        for i, r in enumerate(redove, 1):
+            if r.get("razlika"):
+                for j in (2, 3):
+                    for run in tbl.rows[i].cells[j].paragraphs[0].runs:
+                        run.bold = True
+    return bool(tbl)
+
+
 def vstavi_tablica(doc, marker, koloni, klyuchove, redove, shirini):
     """Таблица на мястото на маркера. Без редове — маркерът остава (излиза с точки)."""
     if not redove:
@@ -389,7 +420,7 @@ def vstavi_tablica(doc, marker, koloni, klyuchove, redove, shirini):
         trPr.append(h)
     par._p.addprevious(t)
     par._p.getparent().remove(par._p)
-    return True
+    return tbl   # истинна стойност — и таблицата, ако някой иска да я доуточни
 
 
 # ── Блоковете на шаблона „ОД с АИ“ (по ПЕТРАКИЕВ) ────────────────────────────
