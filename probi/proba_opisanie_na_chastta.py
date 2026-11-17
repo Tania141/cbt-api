@@ -101,6 +101,27 @@ if os.path.isfile(PAT):
     t("Радулов: таблицата е след „Площ на УПИ“, без подписа", tb.find("Площ на УПИ") < tb.find("Показатели")
       and "Проектант" not in tb, tb[-300:])
 
+# Конструкции на Радулов (17.11.2026): подписът почва с града —
+# „София , 08.2023 г.<таб>Съставил: …“ — и минаваше в описанието.
+KONSTR = "\n".join([
+    "Обща част", "Настоящият конструктивен проект е изготвен на база архитектурен проект.",
+    "Бетона да се уплътнява чрез вибриране.",
+    "София , 08.2023 г.\t\t\tСъставил: . . . . . . . . .", "/Инж. Н.Николов/",
+])
+ok = zp.opisanie_ot_teksta(KONSTR)
+t("Конструкции: подписът с града преди датата отпада", "Съставил" not in ok and "Николов" not in ok
+  and ok.endswith("вибриране."), ok[-120:])
+t("„Съставил:“ насред изречение без двоеточие не реже", "съставил проекта" in
+  zp.opisanie_ot_teksta("Текст.\nИнженерът, който е съставил проекта, е правоспособен.\nКрай."), "")
+PATK = r"C:\Users\Tania\Dropbox\Tania and Nadia\СГРАДИ\ЗА НАДЗОР\РАДУЛОВ\РАДУЛОВ АЛИПИЕВИ\0.ПРОЕКТ\osnoven proekt\Sgrada Reduta.docx"
+if os.path.isfile(PATK):
+    zk = zp.bez_ai(os.path.basename(PATK), "", base64.b64encode(open(PATK, "rb").read()).decode(), "KONSTR")
+    tk = zk["opisanie_blokove"][0]["tekst"] if zk else ""
+    t("Радулов, Конструкции: започва с „Обща част“", tk.startswith("Обща част"), tk[:80])
+    t("Радулов, Конструкции: фундирането е вътре", "фундаментна плоча" in tk and "-3.97" in tk, len(tk))
+    t("Радулов, Конструкции: без подписа", "Съставил" not in tk and "Николов" not in tk, tk[-150:])
+    print(f"  (Радулов, Конструкции: {len(tk)} знака)")
+
 t("без казана част — без АИ не се чете", zp.bez_ai("x.docx", "", base64.b64encode(b"x").decode(), "") is None, "")
 from rules import chetci as ch
 src = open(ch.__file__, encoding="utf-8").read()
