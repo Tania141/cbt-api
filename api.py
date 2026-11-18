@@ -567,7 +567,7 @@ def require_auth(f):
 # Пътищата, които викат модел (Claude/Mistral) — за тавана на демо фирма.
 AI_PATISHTA = {
     "/api/sloy2/chete", "/api/sloy2/razdeli", "/api/zapiski/chete", "/api/sobstvenost/chete",
-    "/api/p2/niva/chete", "/api/beton/dnevnik/chete", "/api/tekst/izpalnenie",
+    "/api/p2/niva/chete", "/api/beton/dnevnik/chete", "/api/tekst/izpalnenie", "/api/koti/chete",
     "/api/ai/chat", "/api/ai/extract-protokol2", "/api/ai/generate",
     "/api/ai/generate-akt15-sgrada", "/api/ai/kategoria-smisyl",
 }
@@ -1858,6 +1858,37 @@ def beton_dnevnik_chete():
                tokens_out=info.get("tokens_out"),
                detail={"fajl": f.get("ime"), "redove": len(dok.get("redove") or [])})
     return jsonify({"dnevnik": dok})
+
+
+@app.route("/api/koti/chete", methods=["POST"])
+@require_auth
+def koti_chete():
+    """Фасада или разрез → котите като избор за Протокол 2 (18.11.2026).
+    Текстов лист — с код; скан или снимка — с АИ. Само предлага."""
+    from rules import fasadni_koti, chetci
+    from rules.sloy2 import NeSeChete, NikoyNeMozhe
+    body = request.get_json() or {}
+    f = body.get("fajl") or {}
+    nalichni = chetci.nalichni()
+    izbor = (body.get("chetec") or "auto").lower()
+    if izbor != "auto":
+        nalichni = [c for c in nalichni if c.kod == izbor] or nalichni
+    try:
+        dok, info = fasadni_koti.procheti(nalichni, f.get("ime", ""), f.get("media_type", ""),
+                                          f.get("data", ""), stranici=body.get("stranici"))
+    except NeSeChete as e:
+        return jsonify({"greshka": str(e)})
+    except NikoyNeMozhe as e:
+        return jsonify({"greshka": f"Нито един четец не прочете котите — {e}"})
+    except Exception as e:
+        print(f"koti_chete: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"greshka": f"{type(e).__name__}: {e}"})
+    log_action("koti_chete", user_id=request.current_user.get("sub"),
+               tenant_id=request.current_user.get("tenant_id"),
+               model=info.get("model"), tokens_in=info.get("tokens_in"),
+               tokens_out=info.get("tokens_out"),
+               detail={"fajl": f.get("ime"), "koti": len(dok.get("koti") or [])})
+    return jsonify({"koti": dok})
 
 
 @app.route("/api/ploshtoobrazuvane", methods=["POST"])
