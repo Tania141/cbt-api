@@ -371,8 +371,14 @@ def shema_dokument(cheklist_redove):
                 "adres": _fakt("адрес или местност"),
             }},
             "uchastnici": {"type": "array", "items": {"type": "object", "properties": {
+                # „ИЗПЪЛНИТЕЛ“ в договор за СМР е строителят — договорът на
+                # Митко Ситекс няма думата „строител“ и излизаше без строител
+                # (операторът, 18.11.2026).
                 "rolya": {"type": "string", "enum": ["възложител", "строител", "надзор",
-                                                     "проектант", "технически ръководител", "друг"]},
+                                                     "проектант", "технически ръководител", "друг"],
+                          "description": "В договор за строителство (СМР) страната „ИЗПЪЛНИТЕЛ“ е "
+                                         "„строител“, а „ВЪЗЛОЖИТЕЛ“ — „възложител“, дори думата "
+                                         "„строител“ да не е написана."},
                 "ime": _fakt("име на лицето или фирмата, буквално"),
                 # ЕГН не се извлича — вж. rules/sobstvenost.py. Нотариалните
                 # актове и декларациите са пълни с ЕГН-та. (15.10.2026)
@@ -607,11 +613,26 @@ def _normalizirai(dok):
     Кодът не гадае смисъла — само прибира стойността на мястото ѝ.
     """
     def fakt(v):
+        # Четецът понякога връща целия факт като ТЕКСТ с JSON вътре —
+        # '{"stoynost": "Главен архитект…", "citat": "…", "stranica": 2}'. Дотук
+        # текстът влизаше цял като стойност и паспортът го изписваше в полето
+        # (операторът, 18.11.2026, РС на Митко Ситекс). Разчита се.
+        import json as _json
+        if isinstance(v, str) and v.strip().startswith("{") and '"stoynost"' in v:
+            try:
+                d = _json.loads(v)
+                if isinstance(d, dict):
+                    v = d
+            except ValueError:
+                pass
         if isinstance(v, dict):
+            s = v.get("stoynost")
+            if isinstance(s, str) and s.strip().startswith("{") and '"stoynost"' in s:
+                return fakt(s)                       # вложено два пъти
             return v
         return {"stoynost": "" if v is None else str(v)}
 
-    for k in ("naimenovanie", "nomer", "data", "izdatel", "material", "proizvoditel", "sadarzhanie"):
+    for k in ("naimenovanie", "nomer", "data", "izdatel", "material", "proizvoditel", "sadarzhanie", "v_sila"):
         if k in dok:
             dok[k] = fakt(dok[k])
     o = dok.get("obekt")
