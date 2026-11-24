@@ -183,6 +183,24 @@ for obekt, (pat, ochakvano) in ISTINSKI.items():
         x = red(r, ime)
         t(f"истински {obekt}: {ime} — {broy}", x and x["broy"] == broy, x and x["broy"])
 
+# ── 4б: „изисквай“ става собствен ред с условие по вида ───────────────────────
+from rules import cheklist_dokumenti as chd
+RED = {"dokument": "Протокол обр. 17 (от подобен обект)", "etap": "подпис", "uslovie": "вид ∈ сграда",
+       "razdel": "Въвеждане в експлоатация — от подобен обект", "osnovanie": "от подобен обект"}
+
+
+def _red_v(vid):
+    sp = chd.spisak({"вид": vid}, faza="od", sobstveni=[RED])
+    return next((r for r in sp.get("redove", []) if r.get("dokument") == RED["dokument"]), None)
+
+
+rs, rl = _red_v("сграда"), _red_v("линеен")
+t("4б: редът „вид ∈ сграда“ се иска при сграда", rs and rs["osi"]["prilozhimost"] == "изисква се", rs and rs["osi"])
+t("4б: и НЕ при линеен", rl and rl["osi"]["prilozhimost"] == "не е приложимо", rl and rl["osi"])
+t("4б: условието не се пренаписва като старите „вид = …“",
+  next(r for r in chd._redove_sas_sobstveni([RED]) if r["dokument"] == RED["dokument"])["uslovie"] == "вид ∈ сграда")
+t("4б: разделът е за въвеждането (Акт 15 / ОД)", chd._faza_na_razdel(RED["razdel"]) == "od")
+
 for x in dobri:
     print("  ok  " + x)
 for x in loshi:

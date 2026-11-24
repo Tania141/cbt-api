@@ -1913,6 +1913,20 @@ def podoben_chete():
     return jsonify({"podoben": rez})
 
 
+@app.route("/api/podoben/redove", methods=["GET"])
+@require_auth
+def podoben_redove():
+    """Редовете на днешния чеклист — за „това е същото като…“ (стъпка 4б).
+    Заключените и твоите собствени, всеки с откъде е."""
+    from rules.sloy2 import _vsichki_redove
+    zakl = _vsichki_redove()
+    imena = {x.strip().lower() for x in zakl}
+    sobstveni = [str((r or {}).get("dokument", "")).strip() for r in _sobstveni_redove()]
+    return jsonify({"redove": [{"dokument": x, "otkade": "чеклистът"} for x in zakl]
+                    + [{"dokument": x, "otkade": "твой ред"} for x in sobstveni
+                       if x and x.lower() not in imena]})
+
+
 @app.route("/api/ploshtoobrazuvane", methods=["POST"])
 @require_auth
 def ploshtoobrazuvane_chete():
@@ -2373,7 +2387,10 @@ def cloud_load():
 # на строежа (вид + съставки). Операторът, 27.10.2026: системата да се учи от
 # него какви са типовете обекти, вместо някой да ги обявява отсега. Всеки урок
 # носи кой, кога и при кои обекти, и се маха. (27.10.2026)
-DANNI_KLYUCHOVE = ("konsultanti", "istoria", "kandidati", "cheklist_sobstveni", "otkazi")
+# „podobni_otgovori“ — трите отговора от „Подобни обекти“ (стъпка 4б,
+# 24.11.2026): изисквай / не и за мен / същото като…, по вид строеж.
+DANNI_KLYUCHOVE = ("konsultanti", "istoria", "kandidati", "cheklist_sobstveni", "otkazi",
+                   "podobni_otgovori")
 
 
 def _danni_proverka(klyuch):
