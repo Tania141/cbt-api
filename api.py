@@ -1891,6 +1891,28 @@ def koti_chete():
     return jsonify({"koti": dok})
 
 
+@app.route("/api/podoben/chete", methods=["POST"])
+@require_auth
+def podoben_chete():
+    """Подобен обект (24.11.2026, стъпка 4а): завършен Акт 15 или ОД → какво
+    изрежда. .docx, с кода, без АИ. Само чете — чеклистът не се пипа."""
+    from rules import podoben_obekt
+    from rules.sloy2 import _vsichki_redove
+    body = request.get_json() or {}
+    f = body.get("fajl") or {}
+    try:
+        rez = podoben_obekt.procheti(f.get("ime", ""), f.get("data", ""), _vsichki_redove())
+    except ValueError as e:
+        return jsonify({"greshka": str(e)})
+    except Exception as e:
+        print(f"podoben_chete: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"greshka": f"файлът не се прочете — {type(e).__name__}: {e}"})
+    log_action("podoben_chete", user_id=request.current_user.get("sub"),
+               tenant_id=request.current_user.get("tenant_id"),
+               detail={"fajl": f.get("ime"), "vid": rez.get("vid"), "redove": len(rez.get("redove") or [])})
+    return jsonify({"podoben": rez})
+
+
 @app.route("/api/ploshtoobrazuvane", methods=["POST"])
 @require_auth
 def ploshtoobrazuvane_chete():
