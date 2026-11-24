@@ -247,8 +247,10 @@ def podgotvi(ime, media_type, data_b64, stranici=None):
             doc = pymupdf.open(stream=raw, filetype=(ext[1:] or "jpg"))
         except Exception:
             raise NeSeChete("изображението не се отваря")
+        # "raw" — без него резервният четец (Mistral OCR) получаваше празна
+        # картина „data:image/jpeg;base64,“ (бетонов дневник .jpg, 24.11.2026).
         return {"blokove": _kartini(doc, min(doc.page_count, MAX_STRANICI)),
-                "stranici": [], "sken": True, "belezhka": "", "n": doc.page_count}
+                "stranici": [], "sken": True, "belezhka": "", "n": doc.page_count, "raw": raw}
 
     raise NeSeChete(f"не чета файлове „{ext or media_type}“ — дай PDF, снимка или .docx")
 
