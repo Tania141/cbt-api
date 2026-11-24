@@ -277,6 +277,13 @@ def red_v_chekliste(ime, redove_chek):
     r, kak = _red_po_zaglavie({"vid": ime}, redove_chek)
     if r:
         return r, kak
+    # Каноничните имена („Заповедна книга“) — по началото на реда („Заповедна
+    # книга на строежа“). Само те: „Нотариален акт“ по началото би хванал
+    # „Нотариален акт за учредено право на строеж“, а е друг документ.
+    if ime in {k for _, k in _KANON}:
+        pasvat = [x for x in redove_chek if _klyuch(x) == _klyuch(ime) or _klyuch(x).startswith(_klyuch(ime) + " ")]
+        if len(pasvat) == 1:
+            return pasvat[0], "системата — по началото на реда"
     m = re.match(r"^(акт|протокол)\s+обр\.\s*(\d+[а-я]?)", ime, re.I)
     if m:
         n = lambda x: _klyuch(x).replace("образец", "обр.")
@@ -284,6 +291,10 @@ def red_v_chekliste(ime, redove_chek):
         chast = ch_ime.group(1).lower() if ch_ime else ""
 
         def pasva(x):
+            # Редът трябва САМ да е актът/протоколът: „Заверено копие на
+            # констативен акт обр. 3 от общината“ е друг документ (28.10.2026).
+            if not re.match(r"^(акт|протокол)", n(x)):
+                return False
             if not re.search(r"(?:\bобр\.?\s*|\b" + m.group(1).lower() + r"\s+)" + re.escape(m.group(2).lower())
                              + r"(?![\dа-я])", n(x)):
                 return False
