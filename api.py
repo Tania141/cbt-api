@@ -1615,6 +1615,17 @@ def nadzor():
         print(f"nadzor: {type(e).__name__}: {e}", flush=True)
         return jsonify({"greshka": f"{type(e).__name__}: {e}"}), 200
 
+    # Твоите редове („изисквай“ от „Подобни обекти“, „приеми“ от „Видени, но
+    # неописани“) — и в моментите, не само в чеклиста на документите (25.11.2026).
+    try:
+        from rules import sobstveni_momenti
+        sobstveni_momenti.dobavi(grupi, _sobstveni_redove(), body.get("priznaci") or {},
+                                 momenti.FAZI.get(body.get("faza") or "nadzor") or momenti.RED)
+    except Exception as e:
+        # Не мълчи: моментите излизат, но се казва, че собствените редове ги няма.
+        print(f"nadzor sobstveni: {type(e).__name__}: {e}", flush=True)
+        body["_sobstveni_greshka"] = f"{type(e).__name__}: {e}"
+
     nalichni = set(body.get("nalichni") or [])
     tekusht = body.get("tekusht") or ""
     mesto = momenti.MYASTO.get(tekusht, len(momenti.RED)) if tekusht else len(momenti.RED)
@@ -1631,7 +1642,8 @@ def nadzor():
         g["po_podrazbirane"] = po_podr.get(g["moment"])
         g["se_sastavya"] = g["moment"] not in (body.get("izklyucheni") or [])
     return jsonify({"red": momenti.RED, "po_izbor": sorted(momenti.PO_IZBOR),
-                    "po_podrazbirane": po_podr, "grupi": grupi})
+                    "po_podrazbirane": po_podr, "grupi": grupi,
+                    "sobstveni_greshka": body.get("_sobstveni_greshka") or ""})
 
 
 # ── Записките по частите на проекта ──────────────────────────────────────────
