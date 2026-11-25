@@ -1947,6 +1947,19 @@ def rechnik_izvori():
                     "momenti": [r["dokument"] for r in momenti.redove()]})
 
 
+@app.route("/api/rechnik/uchi", methods=["POST"])
+@require_auth
+def rechnik_uchi():
+    """Речникът се учи сам (25.11.2026): обобщението на прочетеното от всички
+    обекти (вид · ред · сверен ли · ПИ — без лични данни) → наученото по прага
+    на оператора (3 обекта, 90 %). Само смята; записва браузърът, заедно с
+    казаното от оператора, което бие броенето."""
+    from rules import rechnik_uchene
+    body = request.get_json() or {}
+    return jsonify({"nauchen": rechnik_uchene.uchi(body.get("obobshtenie") or [], body.get("rechnik") or {}),
+                    "prag": {"obekti": rechnik_uchene.PRAG_OBEKTI, "dyal": rechnik_uchene.PRAG_DYAL}})
+
+
 @app.route("/api/podoben/redove", methods=["GET"])
 @require_auth
 def podoben_redove():
