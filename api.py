@@ -1516,6 +1516,28 @@ def izvori_sastoyanie():
                     "vsichki_nalice": not lipsvat})
 
 
+def _danni_na_tenant(klyuch):
+    """Стойността от tenant_danni за текущия наемател — или None."""
+    tenant_id = request.current_user.get("tenant_id") if request.current_user else None
+    if not tenant_id:
+        return None
+    conn = get_db()
+    if not conn:
+        return None
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT stoynost FROM tenant_danni WHERE tenant_id = %s AND klyuch = %s",
+                            (str(tenant_id), klyuch))
+                red = cur.fetchone()
+    except Exception as e:
+        print(f"_danni_na_tenant {klyuch}: {type(e).__name__}: {e}", flush=True)
+        return None
+    finally:
+        conn.close()
+    return red["stoynost"] if red else None
+
+
 def _sobstveni_redove():
     """Редовете, които операторът сам е добавил — от tenant_danni.
 
@@ -1761,6 +1783,13 @@ def sloy2_chete():
     except Exception as e:
         print(f"sloy2_chete: {type(e).__name__} за {f.get('ime')}: {e}", flush=True)
         return jsonify({"greshka": f"{type(e).__name__}: {e}"})
+    # Връзката през речника (25.11.2026): където речникът знае вида, връзката е
+    # неговата — четецът не скача между три реда за един и същ договор.
+    try:
+        from rules import rechnik_uchene
+        rechnik_uchene.prilozhi(dokumenti, _danni_na_tenant("rechnik") or {})
+    except Exception as e:
+        print(f"sloy2_chete речник: {type(e).__name__}: {e}", flush=True)
     if dok.get("zashto_rezerven"):
         print(f"sloy2_chete: резервен четец за {f.get('ime')} — {dok['zashto_rezerven']}", flush=True)
     log_action("sloy2_chete", user_id=request.current_user.get("sub"),

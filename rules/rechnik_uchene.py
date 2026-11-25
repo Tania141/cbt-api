@@ -75,3 +75,38 @@ def uchi(obobshtenie, rechnik=None):
             continue
         izhod[v] = {"red": red, "obekti": len(vsichki), "dyal": round(dyal, 2), "broy_dokumenti": o["dok"]}
     return izhod
+
+
+def red_za_vid(vid, rechnik):
+    u"""Към кой ред сочи видът според речника — казаното от оператора бие
+    наученото. (red, kak) или (None, None). Същото като `rechnikRedZaVid` в ПВА."""
+    r = rechnik or {}
+    v = norm(vid)
+    kaz = (r.get("chetec") or {}).get(v) or {}
+    if kaz.get("red"):
+        return kaz["red"], "речникът — казано от оператора"
+    n = (r.get("nauchen") or {}).get(v) or {}
+    if n.get("red") and f"{v}|{norm(n['red'])}" not in set(r.get("ne") or []):
+        return n["red"], f"речникът — научено от {n.get('obekti')} обекта"
+    return None, None
+
+
+def prilozhi(dokumenti, rechnik):
+    u"""Четецът връзва през речника (стъпка 2, 25.11.2026): АИ-то избира ред
+    всеки път наново и при различни обекти скача между три реда за един и същ
+    договор. Където речникът знае вида — връзката е неговата; онова, което
+    четецът е избрал, се пази в `cheklist_red_chetec`, за да се вижда разликата.
+    Различни образци — никога."""
+    smeneni = 0
+    for d in dokumenti or []:
+        red, kak = red_za_vid(d.get("vid"), rechnik)
+        if not red or red == d.get("cheklist_red"):
+            continue
+        ov, orr = _obrazec(d.get("vid")), _obrazec(red)
+        if ov and orr and ov != orr:
+            continue
+        d["cheklist_red_chetec"] = d.get("cheklist_red") or ""
+        d["cheklist_red"] = red
+        d["red_ot"] = kak
+        smeneni += 1
+    return smeneni

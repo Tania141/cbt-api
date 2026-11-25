@@ -41,8 +41,29 @@ t("„не е“ забранява двойката", not ru.uchi(o, {"ne": ["�
 obr = [d(p, "Акт обр. 7 за приемане", "Акт обр. 14") for p in "abc"]
 t("обр. 7 никога не се учи към обр. 14", not ru.uchi(obr), ru.uchi(obr))
 t("нормализацията е като в ПВА", ru.norm("„Договор“ за присъединяване, (ЕРМ)") == "договор за присъединяване ерм")
+# ── стъпка 2: четецът връзва през речника ─────────────────────────────────────
+ERMV = "Договор за присъединяване на обекти на клиенти към ЕРМ Запад"
+DOG = "Договор за присъединяване от електроразпределителното дружество"
+dok = [{"vid": ERMV, "cheklist_red": "Становище за присъединяване — електроснабдяване"},
+       {"vid": "Нещо непознато", "cheklist_red": "Ред Х"}]
+n = ru.prilozhi(dok, {"chetec": {ru.norm(ERMV): {"red": DOG}}})
+t("казаното от теб сменя връзката на четеца", n == 1 and dok[0]["cheklist_red"] == DOG, dok[0])
+t("и пази какво е избрал четецът", dok[0]["cheklist_red_chetec"] == "Становище за присъединяване — електроснабдяване", dok[0])
+t("и казва откъде", dok[0]["red_ot"] == "речникът — казано от оператора", dok[0])
+t("непознат вид — не се пипа", dok[1]["cheklist_red"] == "Ред Х" and "red_ot" not in dok[1], dok[1])
+dok2 = [{"vid": "Заповедна книга", "cheklist_red": "Договори за строителство и строителен надзор"}]
+ru.prilozhi(dok2, {"nauchen": {"заповедна книга": {"red": ZK, "obekti": 4}}})
+t("наученото по броене — също, с „научено от 4 обекта“", dok2[0]["cheklist_red"] == ZK and "4 обекта" in dok2[0]["red_ot"], dok2[0])
+dok3 = [{"vid": "Заповедна книга", "cheklist_red": "Х"}]
+ru.prilozhi(dok3, {"nauchen": {"заповедна книга": {"red": ZK, "obekti": 4}}, "ne": ["заповедна книга|заповедна книга на строежа"]})
+t("„не е“ спира и наученото", dok3[0]["cheklist_red"] == "Х", dok3[0])
+dok4 = [{"vid": "Акт обр. 7", "cheklist_red": "Х"}]
+ru.prilozhi(dok4, {"chetec": {"акт обр 7": {"red": "Акт обр. 14"}}})
+t("различни образци — никога", dok4[0]["cheklist_red"] == "Х", dok4[0])
+
 api = open(os.path.join(os.path.dirname(__file__), "..", "api.py"), encoding="utf-8").read()
 t("адресът /api/rechnik/uchi вика ученето", "rechnik_uchene.uchi(" in api)
+t("четенето (/api/sloy2/chete) връзва през речника", "rechnik_uchene.prilozhi(dokumenti" in api)
 
 for x in dobri: print("  ok  " + x)
 for x in loshi: print("  ЛО  " + x)
