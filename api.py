@@ -1936,6 +1936,17 @@ def podoben_pod():
                                      bool(body.get("ima_akt15"))))
 
 
+@app.route("/api/rechnik/izvori", methods=["GET"])
+@require_auth
+def rechnik_izvori():
+    """Имената на редовете в двата заключени файла — за речника (25.11.2026).
+    Мярката от същия ден: 94 от 98 реда на моментите са с името от чеклиста;
+    четири се разминават — и точно те не стигат „Липсва ми“."""
+    from rules import cheklist_dokumenti as chd, momenti
+    return jsonify({"cheklist": [r["dokument"] for r in chd.chetene()],
+                    "momenti": [r["dokument"] for r in momenti.redove()]})
+
+
 @app.route("/api/podoben/redove", methods=["GET"])
 @require_auth
 def podoben_redove():
@@ -2412,8 +2423,11 @@ def cloud_load():
 # носи кой, кога и при кои обекти, и се маха. (27.10.2026)
 # „podobni_otgovori“ — трите отговора от „Подобни обекти“ (стъпка 4б,
 # 24.11.2026): изисквай / не и за мен / същото като…, по вид строеж.
+# „rechnik“ — РЕЧНИКЪТ (25.11.2026): един документ → всичките му имена (в
+# чеклиста, в моментите, от четеца, от подобния акт). Решава го операторът,
+# веднъж; пази се на сървъра, защото важи за всички обекти.
 DANNI_KLYUCHOVE = ("konsultanti", "istoria", "kandidati", "cheklist_sobstveni", "otkazi",
-                   "podobni_otgovori")
+                   "podobni_otgovori", "rechnik")
 
 
 def _danni_proverka(klyuch):
