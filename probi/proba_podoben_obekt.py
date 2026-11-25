@@ -201,6 +201,38 @@ t("4б: условието не се пренаписва като старит�
   next(r for r in chd._redove_sas_sobstveni([RED]) if r["dokument"] == RED["dokument"])["uslovie"] == "вид ∈ сграда")
 t("4б: разделът е за въвеждането (Акт 15 / ОД)", chd._faza_na_razdel(RED["razdel"]) == "od")
 
+# ── 4в: законовият под ────────────────────────────────────────────────────────
+from rules import zakonov_pod as zp
+t("4в: категорията от текста е предложение с изречението",
+  s["kategoria_v_teksta"] is None or isinstance(s["kategoria_v_teksta"], dict))
+KAT = chete(docx(["Строеж: Сграда", "Строежът е трета категория съгласно чл. 6, ал. 3 от Наредба № 1",
+                  "Разрешение за строеж № 5/01.02.2023г."]))
+t("4в: „трета категория“ → 3, с изречението", KAT["kategoria_v_teksta"]
+  and KAT["kategoria_v_teksta"]["cifra"] == 3 and "чл. 6" in KAT["kategoria_v_teksta"]["izrechenie"], KAT["kategoria_v_teksta"])
+PETRAKIEV = [{"ime": "Разрешение за строеж"}, {"ime": "Протокол обр. 2"}, {"ime": "Заповедна книга"},
+             {"ime": "Нотариален акт"}, {"ime": "Акт обр. 7"}, {"ime": "Акт обр. 12 по част Архитектура"},
+             {"ime": "Акт обр. 14"}, {"ime": "Скица на сграда"}, {"ime": "Договор за присъединяване", "dosloven": []}]
+p3 = zp.sveri(3, PETRAKIEV, ima_akt15=True)
+lip = {x["kod"]: x for x in p3["lipsvat"]}
+t("4в: трета категория без обр. 5 и 6 → предупреждение (Петракиев, 28.10)", "akt5" in lip and "akt6" in lip, list(lip))
+t("4в: и казва основанието", "1–3" in lip["akt5"]["osnovanie"] and lip["akt5"]["tvardo"], lip.get("akt5"))
+t("4в: самият Акт 15 се брои за наличен", any(x["kod"] == "akt15" for x in p3["namereni"]))
+t("4в: намереното казва с какво", next(x for x in p3["namereni"] if x["kod"] == "rs")["namereno_kato"] == "Разрешение за строеж")
+p4 = zp.sveri(4, PETRAKIEV, ima_akt15=True)
+t("4в: четвърта категория — обр. 5 и 6 НЕ се искат", not any(x["kod"] in ("akt5", "akt6") for x in p4["lipsvat"]), p4["lipsvat"])
+t("4в: 4–5 — договорите „когато са необходими“ не са твърди",
+  next(x for x in zp.sveri(4, [], False)["lipsvat"] if x["kod"] == "prisaedinyavane")["tvardo"] is False)
+t("4в: 4–5 — основанието е чл. 19а, ал. 3", next(x for x in zp.sveri(5, [], False)["lipsvat"] if x["kod"] == "rs")["osnovanie"]
+  == "Наредба № 2, чл. 19а, ал. 3, т. 3")
+t("4в: 1–3 — основанието е чл. 4, ал. 2", next(x for x in zp.sveri(2, [], False)["lipsvat"] if x["kod"] == "rs")["osnovanie"]
+  == "Наредба № 2, чл. 4, ал. 2, т. 2.1")
+t("4в: Протокол 17 не е под — „по поискване“ (операторът, 24.11)", not any(x[0] == "protokol17" for x in zp.POD))
+t("4в: без категория — казва го, не гадае", "greshka" in zp.sveri("", PETRAKIEV))
+NAREDBA = open(os.path.join(os.path.dirname(__file__), "..", "rules", "izvori",
+                            "НАРЕДБА № 2 от 2003 г. за въвеждане в експлоатация на строежите.md"), encoding="utf-8").read()
+t("4в: цитираните членове ги има в наредбата (чл. 4, 14, 19а)",
+  all(x in NAREDBA for x in ("Чл. 4. (1)", "Чл. 14. Комисията", "Чл. 19а.")))
+
 for x in dobri:
     print("  ok  " + x)
 for x in loshi:

@@ -1925,6 +1925,17 @@ def podoben_chete():
     return jsonify({"podoben": rez})
 
 
+@app.route("/api/podoben/pod", methods=["POST"])
+@require_auth
+def podoben_pod():
+    """Законовият под (стъпка 4в, 25.11.2026): подобният акт срещу нормата за
+    категорията му. Само казва — нищо не пише."""
+    from rules import zakonov_pod
+    body = request.get_json() or {}
+    return jsonify(zakonov_pod.sveri(body.get("kategoria"), body.get("redove") or [],
+                                     bool(body.get("ima_akt15"))))
+
+
 @app.route("/api/podoben/redove", methods=["GET"])
 @require_auth
 def podoben_redove():

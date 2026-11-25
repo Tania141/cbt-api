@@ -223,8 +223,17 @@ def procheti_docx(raw, ime=""):
         r["do"] = r["dati"][-1] if len(r["dati"]) > 1 else ""
         r["broy"] = r.pop("_izrichen") or len(r["dosloven"])
         r.pop("_vidyani", None)
+    # Категорията — само ПРЕДЛОЖЕНИЕ с изречението (полето е на ръка: сбъркана
+    # категория сменя законовия под и не личи). 4в, 25.11.2026.
+    kat = None
+    m = re.search(r"\b(първа|втора|трета|четвърта|пета)\s+категория", tekst, re.I)
+    if m:
+        cifra = {"първа": 1, "втора": 2, "трета": 3, "четвърта": 4, "пета": 5}[m.group(1).lower()]
+        nach = tekst.rfind("\n", 0, m.start()) + 1
+        kraj = tekst.find("\n", m.end())
+        kat = {"cifra": cifra, "izrechenie": tekst[nach:kraj if kraj > 0 else None].strip()[:200]}
     return {"fajl": ime, "vid": _vid_na_dokumenta(tekst), "stroezh": stroezh,
-            "godina": godina, "redove": redove, "razdeli": razdeli,
+            "godina": godina, "redove": redove, "razdeli": razdeli, "kategoria_v_teksta": kat,
             "chetec": "кодът — .docx има текст, без АИ"}
 
 
