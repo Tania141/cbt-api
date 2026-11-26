@@ -45,7 +45,8 @@ DROPBOX_FOLDER        = os.environ.get("DROPBOX_FOLDER", "/AKT_Projects")
 ANTHROPIC_API_KEY     = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # Езиковият модел — на едно място, за да не се разминават петте извиквания.
-AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-4-6")
+# 26.11.2026: Claude Sonnet 5.5 (операторът: „смени го“); `AI_MODEL` в Railway бие това.
+AI_MODEL = os.environ.get("AI_MODEL", "claude-sonnet-5-5")
 
 LOCAL_TEMPLATES_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
@@ -1774,6 +1775,8 @@ def sloy2_chete():
                                          edin=bool(body.get("edin")))
         for d in dokumenti:
             d["chetec_izbran"] = izbran
+            if info.get("model"):
+                d["model"] = info.get("model")
         dok = dokumenti[0]
     except sloy2.NeSeChete as e:
         return jsonify({"greshka": str(e)})

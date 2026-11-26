@@ -61,6 +61,47 @@ def _claude_ne_mozhe(e):
     return False
 
 
+# ── Моделът и заявката (26.11.2026) ───────────────────────────────────────────
+# Операторът: „смени го“ — на Claude Sonnet 5.5 ($2 / $10 на милион токена срещу
+# $3 / $15 при Sonnet 4.6). Две разлики, видени в документацията на API-то:
+#   · принуден инструмент (`tool_choice: tool`) връща 400 при Sonnet 5.5, Opus 5.5
+#     и Fable 5.1/5.2 — там: `auto` + ясно указание да запише с инструмента;
+#   · мисленето е включено по подразбиране — за четене не трябва и струва
+#     изходни токени; при Sonnet 5.5 се изключва с `between_tools`.
+# Старите модели (Sonnet 4.6) остават с принудения инструмент — смяната е
+# обратима през `AI_MODEL`.
+MODEL_PO_PODRAZBIRANE = "claude-sonnet-5-5"
+_BEZ_PRINUDA = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "claude-fable-5-2",
+                "claude-mythos-5-1", "claude-mythos-5-2")
+
+
+def prinuden_instrument(model):
+    return not any(str(model or "").startswith(m) for m in _BEZ_PRINUDA)
+
+
+def zayavka_claude(model, shema, blokove, tekst, edin_dokument=True):
+    """Заявката към Claude за четене — според модела."""
+    z = dict(
+        model=model, max_tokens=32000,
+        tools=[{"name": "zapishi_dokument",
+                "description": ("Записва прочетеното от документа." if edin_dokument
+                                else "Записва всички документи във файла наведнъж."),
+                "input_schema": shema}],
+        messages=[{"role": "user", "content": list(blokove) + [{"type": "text", "text": tekst}]}],
+    )
+    if prinuden_instrument(model):
+        z["tool_choice"] = {"type": "tool", "name": "zapishi_dokument"}
+    else:
+        z["tool_choice"] = {"type": "auto"}
+        z["messages"][0]["content"][-1]["text"] = (
+            tekst + "\n\nЗАДЪЛЖИТЕЛНО: запиши резултата САМО с инструмента zapishi_dokument"
+            + (" — по едно извикване за всеки документ." if edin_dokument else " — с едно извикване.")
+            + " Не отговаряй с текст.")
+        if str(model).startswith("claude-sonnet-5-5"):
+            z["thinking"] = {"type": "between_tools"}
+    return z
+
+
 class Claude:
     kod = "claude"
     ime = "Claude"
@@ -98,16 +139,7 @@ class Claude:
         # required for operations that may take longer than 10 minutes“ — и
         # четенето падаше с грешка (операторът, 15.10.2026). Затова се чете
         # поточно и се взима готовото съобщение.
-        zayavka = dict(
-            model=self.model, max_tokens=32000,
-            tools=[{"name": "zapishi_dokument",
-                    "description": ("Записва прочетеното от документа." if edin_dokument
-                                    else "Записва всички документи във файла наведнъж."),
-                    "input_schema": shema_edin}],
-            tool_choice={"type": "tool", "name": "zapishi_dokument"},
-            messages=[{"role": "user",
-                       "content": prep["blokove"] + [{"type": "text", "text": tekst}]}],
-        )
+        zayavka = zayavka_claude(self.model, shema_edin, prep["blokove"], tekst, edin_dokument)
         try:
             # Срокът е ПО-КРАТЪК от този на работника (gunicorn --timeout):
             # иначе работникът умира пръв и резервният четец никога не
@@ -139,7 +171,15 @@ class Claude:
             raise NeMozheSega(str(e)) from e
         info = {"model": getattr(r, "model", self.model),
                 "tokens_in": r.usage.input_tokens, "tokens_out": r.usage.output_tokens}
+        # Новите модели (Sonnet 5.5 и пр.) могат да откажат по своите правила —
+        # тогава резервният четец, с думи защо.
+        if getattr(r, "stop_reason", "") == "refusal":
+            raise NeMozheSega(f"{self.model} отказа да прочете документа (refusal)")
         vhodove = [b.input for b in r.content if getattr(b, "type", "") == "tool_use"]
+        if not vhodove and getattr(r, "stop_reason", "") != "max_tokens" and not prinuden_instrument(self.model):
+            # Без принуждаване моделът може да отговори с текст — не се гадае от
+            # текста, минава се на резервния и се казва.
+            raise NeMozheSega(f"{self.model} не записа документа с инструмента — пробва се резервният четец")
         if getattr(r, "stop_reason", "") == "max_tokens":
             # последното извикване е прекъснато — непълен документ не се записва
             return {"dokumenti": None, "_prekasnat": True}, info
@@ -245,7 +285,7 @@ def nalichni():
     izhod = []
     if os.environ.get("ANTHROPIC_API_KEY"):
         izhod.append(Claude(os.environ["ANTHROPIC_API_KEY"],
-                            os.environ.get("AI_MODEL", "claude-sonnet-4-6")))
+                            os.environ.get("AI_MODEL", MODEL_PO_PODRAZBIRANE)))
     if os.environ.get("MISTRAL_API_KEY"):
         izhod.append(Mistral(os.environ["MISTRAL_API_KEY"],
                              os.environ.get("MISTRAL_OCR_MODEL", "mistral-ocr-latest"),
